@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+build/
+Generated/
+*.xcodeproj/
+*.xcworkspace/
+__pycache__/
+.venv/
+.env
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+*.xcarchive/
+*.ipa

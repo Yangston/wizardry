@@ -1,0 +1,20 @@
+"""Fail early when the archive is not packaged as a distributable watch-only app."""
+import pathlib
+import plistlib
+import sys
+
+archive = pathlib.Path(sys.argv[1])
+apps = list((archive / "Products/Applications").glob("*.app"))
+assert len(apps) == 1, f"Expected one distribution container, found {apps}"
+with (apps[0] / "Info.plist").open("rb") as source:
+    container = plistlib.load(source)
+assert container.get("ITSWatchOnlyContainer"), "Missing watch-only container flag"
+watches = list((apps[0] / "Watch").glob("*.app"))
+assert len(watches) == 1, f"Expected Watch/*.app inside container, found {watches}"
+with (watches[0] / "Info.plist").open("rb") as source:
+    watch = plistlib.load(source)
+assert watch.get("WKApplication") and watch.get("WKWatchOnly"), "Invalid single-target watch app"
+assert (watches[0] / watch["CFBundleExecutable"]).is_file(), "Missing watch executable"
+assert watch["CFBundleIdentifier"].startswith(container["CFBundleIdentifier"] + ".")
+assert watch["CFBundleVersion"] == container["CFBundleVersion"], "Build numbers must match"
+print("Watch-only distribution archive structure verified.")
