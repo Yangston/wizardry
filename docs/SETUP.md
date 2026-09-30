@@ -1,5 +1,25 @@
 # Windows → GitHub Actions → TestFlight → Apple Watch
 
+## Existing Wizardry setup
+
+The Apple identifiers and GitHub `testflight` environment are configured. Routine releases do not require another enrollment, API key, or signing certificate.
+
+- App Store Connect name: **Wizardry: Magic at a Wave**; the watch displays **Wizardry**.
+- Apple app ID: `6817949081`; container bundle: `com.yangston.wizardry`; watch bundle: `com.yangston.wizardry.watchkitapp`.
+- The `testflight` environment permits only `main` and holds the existing Apple signing secrets. The keys were reused from the established You Can't Park There setup with the account owner's approval.
+- The **Personal Testing** internal group contains the account owner and automatically receives uploaded builds after Apple processing.
+- For the next beta, wait for **Build and test** on the exact `main` commit, then manually run **Upload to TestFlight**. Verify Apple processing and group availability before considering delivery complete.
+
+The remaining sections document setup and recovery. Do not recreate working credentials for routine updates.
+
+### First verified TestFlight delivery
+
+On September 30, 2026, version **0.1.0 (2.1)** from commit `caaff0da6647cc1dff09f2667c31ca546d8ac2be` completed Apple processing (`VALID`) and entered internal testing (`IN_BETA_TESTING`). The Personal Testing group has the build and one tester. What to Test notes are saved. This confirms beta availability, not installation or physical Watch testing.
+
+- [Successful native validation](https://github.com/Yangston/wizardry/actions/runs/36788816769)
+- [Successful signed upload](https://github.com/Yangston/wizardry/actions/runs/36789067226)
+- [TestFlight](https://appstoreconnect.apple.com/teams/84fb843d-0ed0-46ad-bd41-9e9c4c38ce66/apps/6817949081/testflight)
+
 ## 1. Prerequisites
 
 - Windows PC with Git and VS Code/Codex.
@@ -29,12 +49,12 @@ In Certificates, Identifiers & Profiles, register these explicit App IDs (platfo
 | Distribution container | `com.yangston.wizardry` |
 | Watch application | `com.yangston.wizardry.watchkitapp` |
 
-These are proposed identifiers, not an assertion that they have already been registered. If unavailable, choose your own prefix and set the `BUNDLE_ID` variable below; keep the `.watchkitapp` suffix for the watch.
+These identifiers are registered for the existing Wizardry app. For a separate app, choose its own prefix and set the `BUNDLE_ID` variable below; keep the `.watchkitapp` suffix for the watch.
 
 At https://appstoreconnect.apple.com/ choose **Apps → + → New App**:
 
 - Platform: **iOS** (Apple categorizes watch-only apps here).
-- Name: Wizardry (or an available name).
+- Name: Wizardry: Magic at a Wave.
 - Primary language: your choice.
 - Bundle ID: the **container** identifier above.
 - SKU: `wizardry-001` or another unique internal identifier.
@@ -43,7 +63,7 @@ Record the numeric **Apple ID** in App Information as `APP_STORE_APP_ID`. Record
 
 ## 4. Create API and certificate keys
 
-In App Store Connect, request API access if prompted, then open **Users and Access → Integrations → App Store Connect API → Team Keys → Generate API Key**. For this workflow's automatic creation of distribution signing assets, use a dedicated team key with Admin access. This grants broad account access; keep it exclusively in the deployment environment. An upload-only key is not sufficient for the automatic certificate/provisioning setup.
+The existing workflow already has a working team API key. For recovery or a separate setup, open **Users and Access → Integrations → App Store Connect API → Team Keys**. Use a team key that can manage signing assets (App Manager works for the established setup). Keep it exclusively in the deployment environment. An upload-only key is not sufficient for the automatic certificate/provisioning setup.
 
 Download the `.p8` key once, and note its Key ID and Issuer ID. This authenticates the build to Apple.
 
@@ -84,6 +104,8 @@ Wait for **Build and test** to pass on the exact `main` commit, then open **Acti
 
 Build numbers use `GITHUB_RUN_NUMBER.GITHUB_RUN_ATTEMPT` for this workflow. Keep this workflow's history, and adjust versioning if uploading independently with another tool.
 
+Both generated Info.plists explicitly use `$(CURRENT_PROJECT_VERSION)` and `$(MARKETING_VERSION)`. Keep these bindings: the signed archive check rejects mismatched watch/container versions. The unsigned archive uses a release-style build number to catch this before signing. Both bundles also declare motion and local-network purpose strings.
+
 No App Store submission or external tester invitation is performed. An upload still needs Apple processing and potentially export-compliance answers before it can be installed. The job does not automatically create tester groups.
 
 ## 7. Install
@@ -119,4 +141,4 @@ Use the checklist in README.md. Start with sensors and haptics; then follow rece
 - https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md
 - https://docs.codemagic.io/knowledge-codemagic/codemagic-cli-tools/
 
-Setup is documented; Apple account enrollment, key creation, and hardware installation must be completed by the account/device owner.
+Hardware installation and motion/haptic verification must be completed on the owner's paired iPhone and Apple Watch. A successful cloud build does not verify physical-device behavior.
