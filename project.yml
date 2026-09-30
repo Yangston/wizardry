@@ -48,6 +48,8 @@ targets:
         CFBundleDisplayName: Wizardry
         ITSWatchOnlyContainer: true
         LSApplicationLaunchProhibited: true
+        NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.
+        NSLocalNetworkUsageDescription: Wizardry sends commands to your computer on your local network.
         ITSAppUsesNonExemptEncryption: false
     dependencies:
       - target: Wizardry

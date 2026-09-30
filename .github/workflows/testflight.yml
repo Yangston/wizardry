@@ -3,11 +3,24 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: testflight
   cancel-in-progress: false
 jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful unsigned build and tests for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_release.py
   distribute:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 30
     environment: testflight

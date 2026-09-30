@@ -17,4 +17,7 @@ assert watch.get("WKApplication") and watch.get("WKWatchOnly"), "Invalid single-
 assert (watches[0] / watch["CFBundleExecutable"]).is_file(), "Missing watch executable"
 assert watch["CFBundleIdentifier"].startswith(container["CFBundleIdentifier"] + ".")
 assert watch["CFBundleVersion"] == container["CFBundleVersion"], "Build numbers must match"
+for name, info in (("container", container), ("watch", watch)):
+    assert info.get("NSMotionUsageDescription", "").strip(), f"Missing motion purpose in {name}"
+    assert info.get("NSLocalNetworkUsageDescription", "").strip(), f"Missing local network purpose in {name}"
 print("Watch-only distribution archive structure verified.")

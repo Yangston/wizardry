@@ -80,7 +80,7 @@ Paste secrets directly into GitHub, not into a chat, source file, issue, or buil
 
 ## 6. Upload
 
-Open **Actions → Upload to TestFlight → Run workflow → main**. The workflow checks configuration names without exposing values, tests the detector, generates the project, fetches/creates profiles for both targets, signs, archives, validates packaging, exports, and uploads.
+Wait for **Build and test** to pass on the exact `main` commit, then open **Actions → Upload to TestFlight → Run workflow → main**. The upload workflow requires that successful unsigned run before accessing signing secrets. It checks configuration names without exposing values, tests the detector, generates the project, fetches/creates profiles for both targets, signs, archives, validates packaging, exports, and uploads.
 
 Build numbers use `GITHUB_RUN_NUMBER.GITHUB_RUN_ATTEMPT` for this workflow. Keep this workflow's history, and adjust versioning if uploading independently with another tool.
 
