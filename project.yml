@@ -26,6 +26,8 @@ targets:
       path: Generated/Watch-Info.plist
       properties:
         CFBundleDisplayName: Wizardry
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         WKApplication: true
         WKWatchOnly: true
         NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.
@@ -46,6 +48,8 @@ targets:
       path: Generated/Container-Info.plist
       properties:
         CFBundleDisplayName: Wizardry
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         ITSWatchOnlyContainer: true
         LSApplicationLaunchProhibited: true
         NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.

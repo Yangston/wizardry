@@ -16,7 +16,10 @@ with (watches[0] / "Info.plist").open("rb") as source:
 assert watch.get("WKApplication") and watch.get("WKWatchOnly"), "Invalid single-target watch app"
 assert (watches[0] / watch["CFBundleExecutable"]).is_file(), "Missing watch executable"
 assert watch["CFBundleIdentifier"].startswith(container["CFBundleIdentifier"] + ".")
-assert watch["CFBundleVersion"] == container["CFBundleVersion"], "Build numbers must match"
+assert watch["CFBundleVersion"] == container["CFBundleVersion"], (
+    f"Build numbers must match: watch={watch['CFBundleVersion']!r}, container={container['CFBundleVersion']!r}"
+)
+assert watch["CFBundleShortVersionString"] == container["CFBundleShortVersionString"], "Release versions must match"
 for name, info in (("container", container), ("watch", watch)):
     assert info.get("NSMotionUsageDescription", "").strip(), f"Missing motion purpose in {name}"
     assert info.get("NSLocalNetworkUsageDescription", "").strip(), f"Missing local network purpose in {name}"
