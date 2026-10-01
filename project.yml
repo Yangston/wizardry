@@ -4,7 +4,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     WIZARDRY_BUNDLE_ID: com.yangston.wizardry
     CODE_SIGN_STYLE: Automatic
@@ -16,6 +16,7 @@ targets:
     sources:
       - path: WatchApp
       - path: Sources/GestureCore
+      - path: Shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(WIZARDRY_BUNDLE_ID).watchkitapp
@@ -29,20 +30,30 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         WKApplication: true
-        WKWatchOnly: true
+        WKCompanionAppBundleIdentifier: $(WIZARDRY_BUNDLE_ID)
+        WKRunsIndependentlyOfCompanionApp: false
         NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.
         NSLocalNetworkUsageDescription: Wizardry sends commands to your computer on your local network.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         ITSAppUsesNonExemptEncryption: false
   WizardryContainer:
-    type: application.watchapp2-container
+    type: application
     platform: iOS
     deploymentTarget: "17.0"
+    sources:
+      - path: PhoneApp
+      - path: Shared
+      - path: Sources/GestureCore
+    entitlements:
+      path: Generated/Phone.entitlements
+      properties:
+        com.apple.developer.homekit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(WIZARDRY_BUNDLE_ID)
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SKIP_INSTALL: NO
     info:
       path: Generated/Container-Info.plist
@@ -50,15 +61,42 @@ targets:
         CFBundleDisplayName: Wizardry
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)
-        ITSWatchOnlyContainer: true
-        LSApplicationLaunchProhibited: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSHomeKitUsageDescription: Wizardry controls the lights, plugs, and scenes you select with your watch gestures.
+        NSAppleMusicUsageDescription: Wizardry sends your selected playback commands to Apple Music.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.yangston.wizardry.spotify
+            CFBundleURLSchemes: [wizardry-spotify]
         NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.
         NSLocalNetworkUsageDescription: Wizardry sends commands to your computer on your local network.
         ITSAppUsesNonExemptEncryption: false
     dependencies:
       - target: Wizardry
         embed: true
+  WizardryPhoneUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [PhoneUITests]
+    dependencies:
+      - target: WizardryContainer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(WIZARDRY_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: WizardryContainer
 schemes:
+  WizardryPhone:
+    build:
+      targets:
+        WizardryContainer: all
+        WizardryPhoneUITests: [test]
+    test:
+      targets: [WizardryPhoneUITests]
   Wizardry:
     build:
       targets:

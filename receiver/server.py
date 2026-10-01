@@ -6,12 +6,16 @@ import json
 import math
 import os
 import platform
+import secrets
 import ssl
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-ALLOWED = {"ping", "volume_up", "volume_down"}
+KEY_CODES = {"volume_up": 0xAF, "volume_down": 0xAE, "mute": 0xAD,
+             "play_pause": 0xB3, "next_track": 0xB0, "previous_track": 0xB1,
+             "next_slide": 0x27, "previous_slide": 0x25}
+ALLOWED = {"ping", *KEY_CODES}
 
 
 class CommandProcessor:
@@ -62,7 +66,7 @@ class CommandProcessor:
 def windows_volume(command):
     if platform.system() != "Windows":
         raise RuntimeError("Volume execution is implemented only for Windows")
-    key = 0xAF if command == "volume_up" else 0xAE
+    key = KEY_CODES[command]
     ctypes.windll.user32.keybd_event(key, 0, 0, 0)
     ctypes.windll.user32.keybd_event(key, 0, 2, 0)
 
@@ -112,16 +116,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1", help="Use 0.0.0.0 to receive LAN requests")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--execute", action="store_true", help="Actually change Windows volume")
+    parser.add_argument("--execute", action="store_true", help="Execute allowed Windows media or presentation keys")
     parser.add_argument("--cert", help="Optional trusted TLS certificate PEM")
     parser.add_argument("--key", help="TLS private key PEM")
+    parser.add_argument("--pair", action="store_true", help="Generate a session-only token and show it locally for iPhone setup")
     args = parser.parse_args()
     if bool(args.cert) != bool(args.key):
         parser.error("Pass both --cert and --key for HTTPS")
     if args.execute and platform.system() != "Windows":
         parser.error("--execute requires Windows; use dry run on the Pi or other systems")
     try:
-        processor = CommandProcessor(os.environ.get("WIZARDRY_TOKEN", ""), args.execute)
+        token = secrets.token_urlsafe(24) if args.pair else os.environ.get("WIZARDRY_TOKEN", "")
+        processor = CommandProcessor(token, args.execute)
     except ValueError as error:
         parser.error(str(error))
     server = HTTPServer((args.host, args.port), handler_for(processor))
@@ -129,6 +135,8 @@ def main():
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
+    if args.pair:
+        print("Pairing token (enter only in Wizardry on your iPhone): " + token, flush=True)
     scheme = "https" if args.cert else "http"
     print(f"Wizardry listening at {scheme}://{args.host}:{args.port}; execute={args.execute}", flush=True)
     try:

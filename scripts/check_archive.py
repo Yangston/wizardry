@@ -1,4 +1,4 @@
-"""Fail early when the archive is not packaged as a distributable watch-only app."""
+"""Fail early when the archive is not packaged as a paired iPhone and Watch app."""
 import pathlib
 import plistlib
 import sys
@@ -8,12 +8,16 @@ apps = list((archive / "Products/Applications").glob("*.app"))
 assert len(apps) == 1, f"Expected one distribution container, found {apps}"
 with (apps[0] / "Info.plist").open("rb") as source:
     container = plistlib.load(source)
-assert container.get("ITSWatchOnlyContainer"), "Missing watch-only container flag"
+assert not container.get("ITSWatchOnlyContainer"), "Expected a launchable iPhone companion"
+assert not container.get("LSApplicationLaunchProhibited"), "iPhone launch is prohibited"
+assert (apps[0] / container["CFBundleExecutable"]).is_file(), "Missing iPhone executable"
+assert container.get("NSHomeKitUsageDescription"), "Missing Home permission description"
 watches = list((apps[0] / "Watch").glob("*.app"))
 assert len(watches) == 1, f"Expected Watch/*.app inside container, found {watches}"
 with (watches[0] / "Info.plist").open("rb") as source:
     watch = plistlib.load(source)
-assert watch.get("WKApplication") and watch.get("WKWatchOnly"), "Invalid single-target watch app"
+assert watch.get("WKApplication") and not watch.get("WKWatchOnly"), "Expected a companion watch app"
+assert watch.get("WKCompanionAppBundleIdentifier") == container["CFBundleIdentifier"], "Watch companion ID mismatch"
 assert (watches[0] / watch["CFBundleExecutable"]).is_file(), "Missing watch executable"
 assert watch["CFBundleIdentifier"].startswith(container["CFBundleIdentifier"] + ".")
 assert watch["CFBundleVersion"] == container["CFBundleVersion"], (
@@ -23,4 +27,4 @@ assert watch["CFBundleShortVersionString"] == container["CFBundleShortVersionStr
 for name, info in (("container", container), ("watch", watch)):
     assert info.get("NSMotionUsageDescription", "").strip(), f"Missing motion purpose in {name}"
     assert info.get("NSLocalNetworkUsageDescription", "").strip(), f"Missing local network purpose in {name}"
-print("Watch-only distribution archive structure verified.")
+print("Paired iPhone and Watch archive structure and versions verified.")

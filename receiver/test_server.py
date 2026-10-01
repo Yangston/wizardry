@@ -5,7 +5,7 @@ import unittest
 import urllib.request
 import uuid
 from http.server import HTTPServer
-from server import CommandProcessor, handler_for
+from server import CommandProcessor, handler_for, KEY_CODES
 
 
 class ReceiverTests(unittest.TestCase):
@@ -30,6 +30,15 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(p.handle(auth, command)[0], 409)
         self.assertEqual(p.handle(auth, self.command())[0], 429)
         self.assertEqual(self.actions, ["volume_up"])
+
+    def test_media_and_presentation_commands_are_allowlisted(self):
+        for command in KEY_CODES:
+            with self.subTest(command=command):
+                actions = []
+                processor = CommandProcessor("test-token-123456789", execute=True,
+                                             clock=lambda:100, volume_action=actions.append)
+                self.assertEqual(processor.handle("Bearer test-token-123456789", self.command(command))[0], 200)
+                self.assertEqual(actions, [command])
 
     def test_dry_run_and_ping_never_execute(self):
         self.processor.execute = False
