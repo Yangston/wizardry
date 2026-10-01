@@ -18,7 +18,7 @@ Volume ends after five seconds without meaningful movement, returning to the vie
 
 Open **Learn single finger tap** on the Watch. Wear it snugly, keep Wizardry visible, and start each step only after reading its instructions. Recording disables mapped actions.
 
-While a recording is already frontmost, the Activate Wizardry shortcut clears pending recognition but preserves the enrollment recording instead of arming controls. This allows the instructed double-touch negative trials with your existing AssistiveTouch assignment. Leaving the app or interrupted sensing still cancels the recording.
+While a recording is already frontmost, the Activate Wizardry shortcut clears pending control input but preserves the complete training recording instead of arming controls. The tap recognition model is disabled during recording. This allows the instructed double-touch negative trials with your existing AssistiveTouch assignment. Leaving the app or interrupted sensing still cancels the recording.
 
 | Step | Instructions | Recording |
 | --- | --- | --- |

@@ -225,11 +225,13 @@ final class MotionController: ObservableObject {
     func activateFromShortcut() {
         // Enrollment deliberately includes double touches as negative trials.
         // AssistiveTouch invokes this same shortcut for them. While a recording
-        // is already frontmost, reset pending recognition without throwing away
+        // is already frontmost, clear pending control input without throwing away
         // the recording or calibrating/arming a control interaction.
         if navigationPath.last == .enrollment, enrollmentRecording, running, gestures.phase == .active {
             cancelShortcutActivation(); gestures.reset(); armed = false; armRemaining = 0
-            tapFrozen = false; pendingMotion = []; capture?.reset(model:nil)
+            // Capture is training-only (no model). Preserve complete candidate
+            // windows so both halves of a negative double touch are recorded.
+            tapFrozen = false; pendingMotion = []
             return
         }
         // Invalidate queued sensor callbacks as well as any earlier launch request.
