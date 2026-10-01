@@ -5,7 +5,7 @@ A native iPhone and Apple Watch gesture remote, developed on Windows and built w
 ## Wave one · 0.2
 
 - **iPhone companion:** set up your computer, connect Apple Home and Spotify, select a profile, and edit every gesture-to-action mapping.
-- **Watch:** a 30-minute control session, deliberate double-twist wake, an eight-second armed window, Double Tap on supported watches, Siri session launch, and native Now Playing controls.
+- **Watch:** touch-free AssistiveTouch/Shortcut launch with hold-still calibration and automatic arming, a 30-minute control session, deliberate double-twist wake for manual use, an eight-second armed window, Double Tap on supported watches, and native Now Playing controls.
 - **Live motion:** graphs and numeric values for acceleration, rotation rate, relative roll/pitch, yaw, and gravity. About 50 Hz capture, 10 Hz display, bounded local buffers, and explicit stale status.
 - **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page.
 - **Phone:** Spotify playback on the active player, Apple Music controls, a locator chime, native volume slider, and named Shortcuts.
@@ -27,7 +27,9 @@ See [release and account setup](docs/SETUP.md) and [the first-wave device checkl
 
 ## Raise · Wake · Act
 
-Start a session on the Watch. Hold still for calibration. With Wizardry frontmost, twist **+ / − / + / −** (or the reverse) within **2.5 seconds**. A double haptic arms the watch. Return to neutral briefly, then make the action gesture within the armed window. Return to neutral between actions.
+**Touch-free entry:** configure [AssistiveTouch launch](docs/SETUP.md#assistivetouch-launch), then **raise wrist → Double Clench → hold still → ready haptic → wrist action**. The shortcut opens Wizardry's control screen, starts a 30-minute session, and arms after 250 ms of steady motion. The configured armed window starts when calibration completes; the launch gesture cannot also execute an action. Return to neutral between actions. Repeat the shortcut whenever you need to open and arm Wizardry again.
+
+**Manual entry:** start a session on the Watch. Hold still for calibration. With Wizardry frontmost, twist **+ / − / + / −** (or the reverse) within **2.5 seconds**. A double haptic arms the watch. Return to neutral briefly, then make the action gesture within the armed window.
 
 | Motion | Computer default | Phone default | Home default |
 |---|---|---|---|
@@ -41,7 +43,9 @@ Home targets start unassigned: choose them before testing. Gesture directions de
 
 ## Runtime and platform limits
 
-**This is not always-on background recognition.** watchOS suspends ordinary apps. Sensors pause and actions disarm on wrist-down/inactive/background transitions. During an active 30-minute session, returning to Wizardry resumes calibration; wake/arm is required again unless explicitly disabled. Set Watch **Settings → General → Return to Clock → After 1 hour** for a reading session. If the clock or another app is showing, reopen Wizardry; Siri's “Start Wizardry” app shortcut can open a session. Double Tap activates Arm while Wizardry is visible on supported watches. No fake workouts or continuous silent audio are used.
+**This is not always-on background recognition.** watchOS suspends ordinary apps. Sensors pause and actions disarm on wrist-down/inactive/background transitions. During an active 30-minute session, returning to Wizardry requires wake/arm again unless explicitly disabled. The AssistiveTouch shortcut or Siri's “Start Wizardry” opens and arms a fresh session after hold-still calibration. A shortcut activation expires after ten seconds if launch/calibration cannot complete. Leaving the active app during calibration, stopping, changing settings, or a sensor failure cancels activation; an ordinary wrist raise cannot replay it. Set Watch **Settings → General → Return to Clock → After 1 hour** for a reading session.
+
+AssistiveTouch requires one-time user setup and replaces Apple's standard Double Tap. With AssistiveTouch off, standard Double Tap activates Arm while Wizardry is visible on supported watches. No fake workouts or continuous silent audio are used. Shortcut discovery, gesture launch, and end-to-end action delivery remain subject to the [physical-device checks](docs/WAVE_ONE.md).
 
 **Spotify:** Premium and developer authorization are required. Controls target the current active Spotify player; start playback there first. Remote volume only works when that player advertises support. Spotify iPhone volume may be unavailable through its API.
 

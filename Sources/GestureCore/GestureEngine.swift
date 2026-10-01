@@ -33,6 +33,16 @@ struct GestureEngine {
         mustSettle = true; neutralSince = nil; candidate = nil; firstShake = nil
         wakeSigns = []; lastSign = 0
     }
+    /// Only call after the launcher has observed a stable wrist for 250 ms.
+    /// The ready haptic means the next deliberate gesture can act immediately.
+    mutating func calibrateAndArm(roll: Double, pitch: Double, sampleTime: Double, readyTime: Double) {
+        reset()
+        guard [roll, pitch, sampleTime, readyTime].allSatisfy(\.isFinite), readyTime >= sampleTime else { return }
+        baseline = (roll, pitch)
+        lastTime = sampleTime
+        arm(time: readyTime)
+        mustSettle = false
+    }
     mutating func update(roll: Double, pitch: Double, acceleration: Double, time: Double) -> Event? {
         guard [roll,pitch,acceleration,time].allSatisfy(\.isFinite) else { reset(); return nil }
         if let previous = lastTime, time <= previous || time - previous > 0.25 { reset() }

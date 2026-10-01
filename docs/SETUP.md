@@ -29,6 +29,26 @@ If TestFlight shows that specific message:
 
 This is a one-time installation-order migration; subsequent paired-app builds update normally. If the expected build is not selected, use TestFlight's Previous Builds picker. Do not infer an archive defect from the old Watch installation alone; inspect the build metadata and the exact device error.
 
+## AssistiveTouch launch
+
+The intended flow is **raise wrist → Double Clench → hold still → ready haptic → wrist action**, with no screen tap after setup. Install the updated app on **both iPhone and Apple Watch** first and open each once for setup and permissions.
+
+1. On iPhone, open **Shortcuts**, create a shortcut named **Activate Wizardry**, and add Wizardry's **Start Wizardry session** action. Use that action, not the generic Open App action, so the watch also calibrates and arms.
+2. In the shortcut's details, enable **Show on Apple Watch**. Let it sync and check that Activate Wizardry appears in Shortcuts on the watch. Run it there once and complete any system permission prompts.
+3. On the watch, enable **Settings → Accessibility → AssistiveTouch → Hand Gestures**.
+4. Select **Double Clench**, choose the Siri Shortcut **Activate Wizardry**, and set **Activation Gesture → None** if that option is available on the installed watchOS version. Otherwise, perform the configured AssistiveTouch activation gesture first, then Double Clench to run the shortcut. Menu wording may vary by watchOS version.
+5. From the watch face, raise your wrist, perform the configured gesture, and hold still until Wizardry gives its ready haptic. Then make your twist, tilt, or shake action. You do not need the four-twist wake sequence after shortcut activation. Return to neutral between actions.
+
+The action is exposed in both apps so it can be configured on iPhone, but **execute it on Apple Watch**. Running it on iPhone displays an instruction to use the watch; it does not remotely launch the watch app. If the action is missing, confirm both updated apps are installed and have been opened, then recheck Shortcuts discovery. Do not substitute a phone-only Open App shortcut.
+
+Wizardry waits for 250 ms of low acceleration and rotation before calibrating the current wrist position and starting the configured armed window. Repeating the shortcut starts a fresh 30-minute session and restarts calibration. Launch motion cannot trigger a mapped action. A ready haptic means gesture input is ready, not that the iPhone, music player, computer, or Home target has acknowledged an action.
+
+If launch or calibration takes ten seconds, Wizardry cancels the activation and asks you to activate again. Lowering your wrist or leaving the app after calibration starts, stopping the session, changing settings, or losing the motion sensor cancels pending activation. Raising your wrist later does not replay that request. When Wizardry is already frontmost, its existing manual wake/arm controls remain available.
+
+AssistiveTouch replaces Apple's standard Double Tap and must be configured by the user; Wizardry cannot change those system settings. It launches **foreground** gesture detection, not an always-on background listener. See [Apple's AssistiveTouch guide](https://support.apple.com/en-mide/guide/watch/apdec70bfd2d/watchos) and [activation instructions](https://support.apple.com/en-us/111111).
+
+The shortest gesture sequence, synced Shortcut routing, launch latency, and locked-phone action delivery must be verified on a real paired watch and phone. Record results in [the device checklist](WAVE_ONE.md); simulator builds do not validate this flow.
+
 ## Routine beta release
 
 1. Commit and push the intended changes to `main`.
