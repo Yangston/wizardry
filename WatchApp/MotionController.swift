@@ -23,10 +23,10 @@ final class MotionController: ObservableObject {
     @Published private(set) var actionFailed = false
     let link = WatchLink()
     private let manager = CMMotionManager()
-    private var engine = GestureEngine()
+    private var gestures = ForegroundGestureSession()
     private var activation = ShortcutActivation()
-    private var sceneActive = false
     private var activationTimeoutTask: Task<Void,Never>?
+    private var armExpiryTask: Task<Void,Never>?
     private var generation = 0
     private var lastDisplay = 0.0
     private var firstSample: Double?
@@ -46,6 +46,7 @@ final class MotionController: ObservableObject {
             if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
             if changed {
                 if self.activation.isPending { self.stop("Settings changed · activate again") }
+                else if self.gestures.phase != .active { self.pause("Settings changed · raise wrist to resume") }
                 else { self.configureEngine() }
                 self.actionID = nil
             }
@@ -54,7 +55,11 @@ final class MotionController: ObservableObject {
         configureEngine()
     }
     private func configureEngine() {
-        engine.reset(); engine.requireWake = configuration.requireWake; engine.threshold = configuration.threshold; engine.armSeconds = configuration.armSeconds
+        armExpiryTask?.cancel(); armExpiryTask = nil
+        gestures.reset()
+        gestures.engine.requireWake = configuration.requireWake
+        gestures.engine.threshold = configuration.threshold
+        gestures.engine.armSeconds = configuration.armSeconds
         armed = false; armRemaining = 0
     }
     func start() {
@@ -74,7 +79,7 @@ final class MotionController: ObservableObject {
         resume()
     }
     func resume() {
-        guard sceneActive, navigationPath.last != .nowPlaying, sessionActive, !running else { return }
+        guard gestures.phase == .active, navigationPath.last != .nowPlaying, sessionActive, !running else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if activation.expire(at:now) { stop("Activation timed out · activate again"); return }
         guard let end = sessionEnd, Date() < end else { stop("Session expired — start again"); return }
@@ -108,15 +113,25 @@ final class MotionController: ObservableObject {
         generation += 1; manager.stopDeviceMotionUpdates(); running = false; buffer = []; configureEngine()
         if sessionActive { status = message }
     }
-    func setSceneActive(_ active: Bool) {
-        sceneActive = active
-        if active { resume() }
+    func setScenePhase(_ phase: ForegroundGestureSession.Phase) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let canContinue = gestures.transition(to:phase,at:now)
+        if phase == .active {
+            resume()
+            if running { updateArmDisplay(at:now) }
+        }
         else {
             // A Shortcut may arrive before the first active scene notification.
-            // Preserve that waiting request, but never resume a started calibration.
+            // Preserve that waiting request, but cancel an unfinished calibration.
             activation.leaveForeground()
             if !activation.isPending { cancelShortcutActivation() }
-            suspendCapture(activation.isPending ? "Opening control · hold still" : "Paused · raise wrist to resume")
+            if canContinue && running {
+                // Keep the same subscription, baseline, and deadline while inactive.
+                // watchOS may still suspend delivery; every sample is checked for age.
+                updateArmDisplay(at:now)
+            } else {
+                suspendCapture(activation.isPending ? "Opening control · hold still" : "Paused · raise wrist to resume")
+            }
         }
     }
     func navigationChanged() {
@@ -148,19 +163,53 @@ final class MotionController: ObservableObject {
         actionID = nil
     }
     func arm() {
+        guard gestures.phase == .active else { return }
         cancelShortcutActivation()
         if !sessionActive { start() }
         guard running else { return }
-        engine.arm(time:ProcessInfo.processInfo.systemUptime); armed = true; status = "Return to neutral, then act"
+        gestures.engine.arm(time:ProcessInfo.processInfo.systemUptime)
+        scheduleArmExpiry(); armed = true; status = "Return to neutral, then act"
         WKInterfaceDevice.current().play(.success)
+    }
+    private func scheduleArmExpiry() {
+        armExpiryTask?.cancel()
+        let deadline = gestures.engine.armedUntil
+        armExpiryTask = Task { [weak self] in
+            // Sleep may be delayed by system suspension. Delivery and scene-change
+            // paths also check this absolute deadline before allowing any action.
+            while !Task.isCancelled {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                if remaining <= 0 { break }
+                do { try await Task.sleep(for:.seconds(remaining)) } catch { return }
+            }
+            guard !Task.isCancelled, let self else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            self.gestures.expireArm(at:now)
+            if self.gestures.phase == .inactive {
+                self.pause("Armed window ended · raise wrist to resume")
+            } else {
+                self.updateArmDisplay(at:now)
+            }
+        }
+    }
+    private func updateArmDisplay(at now: Double) {
+        armed = gestures.engine.isArmed(at:now)
+        armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
+        if activation.isPending { status = "Hold still · preparing gestures" }
+        else if armed { status = "Armed · \(armRemaining)s" }
+        else { status = configuration.requireWake ? "Double twist to wake" : "Ready for a gesture" }
     }
     func testHaptic() { WKInterfaceDevice.current().play(.click) }
     private func consume(time: Double,roll: Double,pitch: Double,yaw: Double,ax: Double,ay: Double,az: Double,rx: Double,ry: Double,rz: Double,gx: Double,gy: Double,gz: Double) {
         guard let end = sessionEnd, Date() < end else { stop("Session expired — start again"); return }
-        if firstSample == nil { firstSample = time }
-        samples += 1
         let acceleration = sqrt(ax*ax+ay*ay+az*az)
         let now = ProcessInfo.processInfo.systemUptime
+        gestures.expireArm(at:now)
+        guard gestures.allowsMotion(at:now) else {
+            pause("Paused · raise wrist to resume")
+            return
+        }
+        var gestureEvent: GestureEngine.Event?
         if activation.isPending {
             // Never feed launch motion to the action recognizer, even with wake disabled.
             let event = activation.update(roll:roll,pitch:pitch,acceleration:acceleration,
@@ -169,7 +218,8 @@ final class MotionController: ObservableObject {
             switch event {
             case .ready:
                 cancelShortcutActivation()
-                engine.calibrateAndArm(roll:roll,pitch:pitch,sampleTime:time,readyTime:now)
+                gestures.calibrateAndArm(roll:roll,pitch:pitch,sampleTime:time,readyTime:now)
+                scheduleArmExpiry()
                 armed = true; armRemaining = Int(ceil(configuration.armSeconds))
                 status = "Ready · make a gesture"
                 WKInterfaceDevice.current().play(.success)
@@ -177,9 +227,26 @@ final class MotionController: ObservableObject {
             case .invalidMotion: stop("Motion unavailable · activate again"); return
             case nil: break
             }
-        } else if let event = engine.update(roll:roll,pitch:pitch,acceleration:acceleration,time:time) {
+            // The calibration helper also rejects stale delivery. Do not publish
+            // those buffered frames as fresh live telemetry while waiting.
+            guard time <= now, now - time <= 0.25 else { buffer = []; sampleRate = 0; return }
+        } else {
+            let result = gestures.update(roll:roll,pitch:pitch,acceleration:acceleration,sampleTime:time,now:now)
+            guard result.accepted else {
+                buffer = []; sampleRate = 0; firstSample = nil; samples = 0
+                if !gestures.allowsMotion(at:now) { pause("Motion interrupted · raise wrist to resume") }
+                else { updateArmDisplay(at:now) }
+                return
+            }
+            gestureEvent = result.event
+        }
+        if firstSample == nil { firstSample = time }
+        samples += 1
+        if let event = gestureEvent {
             switch event {
-            case .woke: WKInterfaceDevice.current().play(.success); status = "Return to neutral, then act"
+            case .woke:
+                scheduleArmExpiry()
+                WKInterfaceDevice.current().play(.success); status = "Return to neutral, then act"
             case .action(let gesture):
                 guard let binding = configuration.selectedProfile.bindings.first(where:{$0.gesture == gesture && $0.enabled}) else { return }
                 count += 1; lastGesture = gesture.title; WKInterfaceDevice.current().play(.click)
@@ -188,16 +255,12 @@ final class MotionController: ObservableObject {
             }
         }
         if time-lastDisplay >= 0.1 {
-            armed = engine.isArmed
-            armRemaining = armed ? max(0,Int(ceil(engine.armedUntil-now))) : 0
-            if activation.isPending { status = "Hold still · preparing gestures" }
-            else if !armed { status = configuration.requireWake ? "Double twist to wake" : "Ready for a gesture" }
-            else { status = "Armed · \(armRemaining)s" }
-            rollDegrees = engine.relativeRoll*180 / .pi
+            updateArmDisplay(at:now)
+            rollDegrees = gestures.engine.relativeRoll*180 / .pi
             let elapsed = time-(firstSample ?? time); sampleRate = elapsed > 0 ? Double(samples-1)/elapsed : 0
             lastDisplay = time
             if Date().timeIntervalSince1970 < link.streamUntil {
-                buffer.append(.init(time:Date().timeIntervalSince1970,roll:engine.relativeRoll,pitch:engine.relativePitch,yaw:yaw,
+                buffer.append(.init(time:Date().timeIntervalSince1970,roll:gestures.engine.relativeRoll,pitch:gestures.engine.relativePitch,yaw:yaw,
                     ax:ax,ay:ay,az:az,rx:rx,ry:ry,rz:rz,gx:gx,gy:gy,gz:gz,hz:sampleRate,state:status))
                 if buffer.count >= 5 { link.sendFrames(buffer); buffer = [] }
             } else { buffer = [] }

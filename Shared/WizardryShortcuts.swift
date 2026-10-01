@@ -5,7 +5,7 @@ import Foundation
 // iPhone and executed locally by the installed watch companion.
 struct StartWizardrySession: AppIntent {
     static var title: LocalizedStringResource = "Start Wizardry session"
-    static var description = IntentDescription("Run on your watch to open Wizardry. Hold your wrist still, then feel a ready haptic and make a control gesture. Starts a 30-minute session; detection pauses when the app is inactive.")
+    static var description = IntentDescription("Run on your watch to open Wizardry. Hold still for the ready haptic, then make a control gesture. Starts a 30-minute session. Armed gestures tolerate brief dimming while motion remains available.")
     static var openAppWhenRun = true
 
     @MainActor func perform() async throws -> some IntentResult {

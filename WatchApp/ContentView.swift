@@ -38,7 +38,14 @@ struct ContentView: View {
                     }
                 }
         }
-        .onChange(of:scenePhase,initial:true) { _,phase in motion.setSceneActive(phase == .active) }
+        .onChange(of:scenePhase,initial:true) { _,phase in
+            switch phase {
+            case .active: motion.setScenePhase(.active)
+            case .inactive: motion.setScenePhase(.inactive)
+            case .background: motion.setScenePhase(.background)
+            @unknown default: motion.setScenePhase(.background)
+            }
+        }
         .onChange(of:motion.navigationPath) { _,_ in motion.navigationChanged() }
     }
     private var armButton: some View {
@@ -54,14 +61,14 @@ struct ContentView: View {
                 Text("On your watch, enable Settings → Accessibility → AssistiveTouch → Hand Gestures. Assign Double Clench to the Activate Wizardry shortcut.")
                 Text("Set Activation Gesture to None if available. Otherwise, perform your AssistiveTouch activation gesture first, then Double Clench to run the shortcut.")
                 Text("Raise your wrist, run the gesture, and hold still until the ready haptic. Then twist, tilt, or shake to act. No four-twist wake is needed after shortcut activation.")
-                Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. Detection runs only while Wizardry is active.")
+                Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. Armed gestures can continue during brief dimming if motion remains available. Leaving Wizardry disarms them.")
                 Text("Manual control").font(.headline)
                 Text("Start a session. Raise your wrist with Wizardry frontmost. Twist + / − / + / − within 2.5 seconds, return to neutral, then make your action.")
                 Text("With AssistiveTouch off, standard Double Tap can press Arm on supported watches. Raise-to-resume requires an active session. Repeat the activation shortcut to open and arm Wizardry again.")
                 ForEach(motion.configuration.selectedProfile.bindings.filter(\.enabled)) { binding in
                     Text("\(binding.gesture.title) → \(binding.summary)")
                 }
-                Text("Sensors pause on wrist-down. For a reading session, set Return to Clock to After 1 hour in Watch settings.")
+                Text("Dimming keeps only the time left in your armed window. It does not restart the countdown or keep the screen awake. If sensing is interrupted, return to neutral before acting again. Watch settings → Gestures → Wrist Flick → Off may help prevent accidental dismissal.")
             }.font(.caption).padding()
         }.navigationTitle("How to wave")
     }

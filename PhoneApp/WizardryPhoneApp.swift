@@ -297,7 +297,7 @@ struct SetupView: View {
                     Text("Select Apple Music actions in Motions if you use Apple's Music app.").font(.caption)
                 }
                 Section("Session behavior") {
-                    Text("Sessions last up to 30 minutes. Wrist-down or backgrounding pauses sensors and disarms actions. Raising your wrist resumes calibration only while the session remains active. A wake gesture cannot run while the app is suspended. No continuous background monitoring is claimed.")
+                    Text("Sessions last up to 30 minutes. Once armed, brief dimming preserves the remaining armed time and gestures can continue if motion samples keep arriving. Leaving the app disarms actions. Late samples are discarded; return to neutral after a sensing interruption. Wizardry cannot keep the screen awake or recognize motion while watchOS suspends sensing.")
                     Text("Commands expire after 5 seconds and are not retried or queued. A gesture haptic confirms recognition; the result on the watch reports execution, a handoff, or a failure.")
                 }.font(.caption)
             }.navigationTitle("Setup")

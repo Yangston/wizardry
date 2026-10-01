@@ -47,7 +47,11 @@ If launch or calibration takes ten seconds, Wizardry cancels the activation and 
 
 AssistiveTouch replaces Apple's standard Double Tap and must be configured by the user; Wizardry cannot change those system settings. It launches **foreground** gesture detection, not an always-on background listener. See [Apple's AssistiveTouch guide](https://support.apple.com/en-mide/guide/watch/apdec70bfd2d/watchos) and [activation instructions](https://support.apple.com/en-us/111111).
 
-The shortest gesture sequence, synced Shortcut routing, launch latency, and locked-phone action delivery must be verified on a real paired watch and phone. Record results in [the device checklist](WAVE_ONE.md); simulator builds do not validate this flow.
+After the ready haptic, brief dimming preserves the **remaining** armed time and calibrated wrist position. It never restarts the countdown. Gestures can continue if watchOS keeps delivering fresh motion samples. If delivery is interrupted, incomplete gestures are discarded and you must return to neutral before acting again. Late samples are never replayed as commands. Actually leaving Wizardry, navigating to Now Playing, stopping, changing settings, or sensor failure still disarms the watch. Without an explicit armed window, detection pauses while inactive even if Require Wake is disabled.
+
+This does not force the screen to stay awake or grant background runtime. On supported watches, **Settings → Gestures → Wrist Flick → Off** may prevent rolls from being interpreted as the system's dismissal gesture. See [Apple's Wrist Flick guide](https://support.apple.com/guide/watch/use-gestures-for-notifications-and-alerts-apd8bcbaa778/27/watchos/27).
+
+The shortest gesture sequence, synced Shortcut routing, launch latency, motion continuity during dimming, and locked-phone action delivery must be verified on a real paired watch and phone. Record results in [the device checklist](WAVE_ONE.md); simulator builds do not validate this flow.
 
 ## Routine beta release
 

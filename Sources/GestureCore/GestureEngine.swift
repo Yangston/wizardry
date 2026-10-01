@@ -24,9 +24,19 @@ struct GestureEngine {
     var armSeconds = 8.0
 
     var isArmed: Bool { (lastTime ?? 0) < armedUntil }
+    func isArmed(at time: Double) -> Bool { time.isFinite && time < armedUntil }
     mutating func reset() {
         let wake = requireWake, angle = threshold, seconds = armSeconds
         self = Self(); requireWake = wake; threshold = angle; armSeconds = seconds
+    }
+    /// Discard incomplete gestures after a delivery interruption, retaining the
+    /// calibrated neutral position, cooldown, and only the unexpired arm deadline.
+    mutating func interruptMotion(at time: Double) {
+        let origin = baseline, deadline = armedUntil, previousFire = lastFire
+        reset()
+        baseline = origin
+        lastFire = previousFire
+        if time.isFinite && time < deadline { armedUntil = deadline }
     }
     mutating func arm(time: Double) {
         armedUntil = time + armSeconds
