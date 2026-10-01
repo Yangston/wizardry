@@ -2,9 +2,8 @@ import XCTest
 @testable import GestureCore
 
 final class ForegroundGestureSessionTests: XCTestCase {
-    private func armedSession(requireWake: Bool = true) -> ForegroundGestureSession {
+    private func armedSession() -> ForegroundGestureSession {
         var session = ForegroundGestureSession()
-        session.engine.requireWake = requireWake
         session.engine.armSeconds = 4
         session.transition(to:.active,at:1)
         session.calibrateAndArm(roll:0.4,pitch:-0.2,sampleTime:1,readyTime:1)
@@ -56,8 +55,8 @@ final class ForegroundGestureSessionTests: XCTestCase {
     }
 
     func testExpiryWithoutSamplesDisablesInactiveMotionEvenWithWakeDisabled() {
-        for requireWake in [true,false] {
-            var session = armedSession(requireWake:requireWake)
+        for _ in [true,false] {
+            var session = armedSession()
             session.transition(to:.inactive,at:1.1)
             session.expireArm(at:5)
             XCTAssertFalse(session.allowsMotion(at:5))
@@ -79,10 +78,9 @@ final class ForegroundGestureSessionTests: XCTestCase {
     }
 
     func testUnarmedInactiveSessionCannotWakeOrUseWakeDisabledToAct() {
-        for requireWake in [true,false] {
+        for _ in [true,false] {
             var session = ForegroundGestureSession()
-            session.engine.requireWake = requireWake
-            session.transition(to:.active,at:1)
+                session.transition(to:.active,at:1)
             XCTAssertFalse(session.transition(to:.inactive,at:1.1))
             for i in 0...30 {
                 let result = sample(&session,at:1.2 + Double(i)*0.02,

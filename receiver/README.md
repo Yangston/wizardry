@@ -30,3 +30,8 @@ There is no arbitrary command or shell execution. UUID replay prevention, token 
 HTTP is for a trusted private LAN; optional `--cert certificate.pem --key private.key` serves HTTPS with a certificate trusted by the phone. Do not expose this listener to the internet. Pi/macOS/Linux can run dry-run mode; execution in this version is implemented for Windows.
 
 Run tests: `python -m unittest discover -s receiver -v`.
+
+
+## Live volume
+
+The authenticated `/volume` endpoint reads/sets absolute Windows Core Audio volume through ordered begin/update/end sessions. Run the updated receiver for Watch live height control. Execute mode uses the current default multimedia output; dry run simulates volume without audio changes. No extra dependencies are required. Live requests expire after one second and session updates are limited to five per second. A final end request closes the session, preventing delayed updates. See [live-volume setup and protocol](../docs/LIVE_VOLUME.md).

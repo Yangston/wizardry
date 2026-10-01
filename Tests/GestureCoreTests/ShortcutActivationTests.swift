@@ -117,10 +117,9 @@ final class ShortcutActivationTests: XCTestCase {
     }
 
     func testCalibratedBaselineAllowsFirstGestureAndStartsFullArmedWindow() {
-        for requireWake in [true,false] {
+        for _ in [true,false] {
             var activation = ShortcutActivation()
             var engine = GestureEngine()
-            engine.requireWake = requireWake
             engine.armSeconds = 4
             activation.request(at:0)
             activation.beginCapture(at:1)

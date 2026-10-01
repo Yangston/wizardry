@@ -2,14 +2,15 @@
 @testable import GestureCore
 
 final class GestureEngineTests: XCTestCase {
-    func testWakeOnlyArmsAndRequiresSettlingBeforeAction() {
+    func testTwistsCannotArmAndExplicitArmRequiresSettling() {
         var engine = GestureEngine()
         _ = engine.update(roll:0,pitch:0,acceleration:0,time:0)
         for (index,angle) in [0.6,-0.6,0.6,-0.6].enumerated() {
             let event = engine.update(roll:angle,pitch:0,acceleration:0,time:Double(index+1)*0.2)
-            XCTAssertEqual(event,index == 3 ? .woke : nil)
+            XCTAssertNil(event)
         }
-        XCTAssertTrue(engine.isArmed)
+        XCTAssertFalse(engine.isArmed)
+        engine.arm(time:0.8)
         XCTAssertNil(engine.update(roll:0.9,pitch:0,acceleration:0,time:1.0))
         for i in 51...70 { XCTAssertNil(engine.update(roll:0,pitch:0,acceleration:0,time:Double(i)*0.02)) }
         var events: [GestureEngine.Event] = []
@@ -27,7 +28,7 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertNil(engine.update(roll:.nan,pitch:0,acceleration:0,time:5.02))
     }
     func testPitchAndDoubleShakeRequireNeutralAndCooldown() {
-        var e = GestureEngine(); e.requireWake = false
+        var e = GestureEngine(); e.arm(time:0)
         for i in 0...20 { _ = e.update(roll:0,pitch:0,acceleration:0,time:Double(i)*0.02) }
         var events: [GestureEngine.Event] = []
         for i in 21...45 { if let event = e.update(roll:0,pitch:0.9,acceleration:0,time:Double(i)*0.02) { events.append(event) } }
@@ -38,7 +39,7 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertEqual(events,[.action(.pitchUp),.action(.shake)])
         XCTAssertNil(e.update(roll:0,pitch:0,acceleration:1.5,time:2.22))
     }
-    func testWakeTimesOutAndAngleWrapDoesNotTrigger() {
+    func testArmExpiresAndAngleWrapDoesNotTrigger() {
         var e = GestureEngine()
         _ = e.update(roll:3.1,pitch:0,acceleration:0,time:0)
         for i in 1...50 { XCTAssertNil(e.update(roll:-3.1,pitch:0,acceleration:0,time:Double(i)*0.02)) }

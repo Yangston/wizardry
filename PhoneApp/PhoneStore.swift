@@ -18,6 +18,8 @@ final class PhoneStore: ObservableObject {
     let home = HomeController()
     let spotify = SpotifyController()
     private var gate = CommandGate()
+    private var volumeGate = VolumeCommandGate()
+    private var volumeBusy = false
     private var player: AVAudioPlayer?
     private var chimeGeneration = 0
     private let network = ComputerClient()
@@ -48,7 +50,7 @@ final class PhoneStore: ObservableObject {
             guard let binding = self.gate.accept(event,configuration:self.configuration,now:Date().timeIntervalSince1970) else {
                 reply(.failure("Expired, duplicate, disabled, or out-of-date gesture. Sync settings and try again.")); return
             }
-            guard !self.busy else { reply(.failure("Previous action still running")); return }
+            guard !self.busy, !self.volumeBusy else { reply(.failure("Previous action still running")); return }
             Task {
                 let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry action",expirationHandler:nil)
                 let result = await self.perform(binding,deadline:event.createdAt+5)
@@ -57,6 +59,21 @@ final class PhoneStore: ObservableObject {
             }
         }
         if UserDefaults.standard.bool(forKey:"homeEnabled") { home.connect() }
+        link.volumeReceived = { [weak self] request,reply in
+            guard let self else { reply(.failure("Phone unavailable",request:request)); return }
+            guard !self.volumeBusy, !self.busy,
+                  self.volumeGate.accept(request,configuration:self.configuration,now:Date().timeIntervalSince1970) else {
+                reply(.failure("Expired, busy, or invalid volume session",request:request)); return
+            }
+            self.volumeBusy = true
+            Task {
+                let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
+                let result = await self.network.volume(request,endpoint:self.endpoint,token:PairingKeychain.load())
+                self.volumeBusy = false
+                reply(result)
+                if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+            }
+        }
     }
     func saveConfiguration() {
         guard configuration.isValid else { return }
@@ -77,7 +94,7 @@ final class PhoneStore: ObservableObject {
     func test(_ binding: GestureBinding) { Task { _ = await perform(binding,deadline:Date().timeIntervalSince1970+5) } }
     func clearFrames() { frames = []; lastTelemetry = .distantPast }
     private func perform(_ binding: GestureBinding, deadline: Double) async -> ActionResult {
-        guard !busy, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
+        guard !busy, !volumeBusy, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
         busy = true; defer { busy = false }
         let result: ActionResult
         if let command = binding.action.computerCommand {
@@ -135,6 +152,29 @@ final class PhoneStore: ObservableObject {
 }
 
 final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func volume(_ event: VolumeRequest, endpoint: String, token: String) async -> VolumeReply {
+        guard let base = URL(string:endpoint.trimmingCharacters(in:.whitespacesAndNewlines)),
+              ["http","https"].contains(base.scheme ?? ""),base.host != nil,base.user == nil,base.password == nil,
+              base.query == nil,base.fragment == nil,token.count >= 16,
+              Date().timeIntervalSince1970-event.createdAt <= 1 else { return .failure("Pair receiver, or request expired",request:event) }
+        var request = URLRequest(url:base.appendingPathComponent("volume"),timeoutInterval:1)
+        request.httpMethod = "POST"
+        request.setValue("Bearer "+token,forHTTPHeaderField:"Authorization")
+        request.setValue("application/json",forHTTPHeaderField:"Content-Type")
+        request.httpBody = try? JSONEncoder().encode(event)
+        do {
+            let (data,response) = try await session.data(for:request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return .failure("Receiver rejected live volume; check version, session, and clock",request:event)
+            }
+            let result = try JSONDecoder().decode(VolumeReply.self,from:data)
+            guard result.sessionID == event.sessionID, result.sequence == event.sequence,
+                  let volume = result.volume, volume.isFinite, (0...1).contains(volume) else {
+                return .failure("Invalid volume acknowledgement",request:event)
+            }
+            return result
+        } catch { return .failure("Volume connection failed: \(error.localizedDescription)",request:event) }
+    }
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 4; config.timeoutIntervalForResource = 5; config.waitsForConnectivity = false

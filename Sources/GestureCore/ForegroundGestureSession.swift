@@ -38,7 +38,7 @@ struct ForegroundGestureSession {
     }
 
     mutating func update(roll: Double, pitch: Double, acceleration: Double,
-                         sampleTime: Double, now: Double) -> (accepted: Bool, event: GestureEngine.Event?) {
+                         sampleTime: Double, now: Double, suppressActions: Bool = false) -> (accepted: Bool, event: GestureEngine.Event?) {
         expireArm(at:now)
         guard allowsMotion(at:now) else { reset(); return (false,nil) }
         guard [roll,pitch,acceleration,sampleTime,now].allSatisfy(\.isFinite), acceleration >= 0 else {
@@ -56,6 +56,6 @@ struct ForegroundGestureSession {
             engine.interruptMotion(at:now)
         }
         lastSampleTime = sampleTime
-        return (true,engine.update(roll:roll,pitch:pitch,acceleration:acceleration,time:sampleTime))
+        return (true,engine.update(roll:roll,pitch:pitch,acceleration:acceleration,time:sampleTime,suppressActions:suppressActions))
     }
 }

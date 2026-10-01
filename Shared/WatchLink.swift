@@ -8,6 +8,7 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var status = "Connecting to paired device…"
     var configurationReceived: ((WizardryConfiguration) -> Void)?
     var gestureReceived: ((GestureRequest, @escaping (ActionResult) -> Void) -> Void)?
+    var volumeReceived: ((VolumeRequest, @escaping (VolumeReply) -> Void) -> Void)?
     var framesReceived: (([MotionFrame]) -> Void)?
     var activated: (() -> Void)?
     private(set) var streamUntil = 0.0
@@ -58,6 +59,18 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
             Task { @MainActor in completion(.failure("Phone: \(error.localizedDescription)")) }
         })
     }
+    func sendVolume(_ request: VolumeRequest, completion: @escaping (VolumeReply) -> Void) {
+        guard let session, session.activationState == .activated, session.isReachable,
+              let data = try? JSONEncoder().encode(request) else {
+            completion(.failure("iPhone unreachable",request:request)); return
+        }
+        session.sendMessage(["volume":data], replyHandler: { reply in
+            let result = (reply["volumeReply"] as? Data).flatMap {try? JSONDecoder().decode(VolumeReply.self,from:$0)}
+            Task { @MainActor in completion(result ?? .failure("Invalid volume reply",request:request)) }
+        }, errorHandler: { error in
+            Task { @MainActor in completion(.failure(error.localizedDescription,request:request)) }
+        })
+    }
     private func updateStatus() {
         reachable = session?.isReachable == true
         #if os(iOS)
@@ -102,6 +115,13 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
         }
         reply?(["ok":true])
         #else
+        if let data = message["volume"] as? Data, let event = try? JSONDecoder().decode(VolumeRequest.self,from:data) {
+            let respond: (VolumeReply)->Void = { result in
+                if let encoded = try? JSONEncoder().encode(result) { reply?(["volumeReply":encoded]) }
+            }
+            guard let handler = volumeReceived else { respond(.failure("Phone is starting",request:event)); return }
+            handler(event,respond); return
+        }
         if let data = message["frames"] as? Data,
            let frames = try? JSONDecoder().decode([MotionFrame].self,from:data), frames.count <= 10 {
             framesReceived?(frames); reply?(["ok":true]); return

@@ -5,7 +5,7 @@ import WatchKit
 
 @MainActor
 final class MotionController: ObservableObject {
-    enum Screen: Hashable { case nowPlaying, guide }
+    enum Screen: Hashable { case nowPlaying, guide, enrollment }
     static let shared = MotionController()
     @Published var navigationPath: [Screen] = []
     @Published private(set) var activatingFromShortcut = false
@@ -23,6 +23,24 @@ final class MotionController: ObservableObject {
     @Published private(set) var actionFailed = false
     let link = WatchLink()
     private let manager = CMMotionManager()
+    lazy var volume = LiveVolumeRemote(link:link)
+    @Published private(set) var enrollment = TapEnrollment()
+    @Published private(set) var enrollmentRecording = false
+    @Published private(set) var enrollmentRemaining = 0
+    @Published private(set) var tapEnrollmentStatus = "Single tap disabled - enroll first"
+    private var tapModel: FingerTapModel?
+    private var capture: MotionCapture?
+    private var lastMotion: CapturedMotion?
+    private var lastAccepted: Double?
+    private var lastDelivery = 0.0
+    private var arbiter = ExtensionArbiter()
+    private var tracker = VerticalVolumeTracker()
+    private var volumeClaimed = false
+    private var tapFrozen = false
+    private var pendingMotion: [CapturedMotion] = []
+    private var viewingSince: Double?
+    private var ignoreTapsUntil = 0.0
+    private var enrollmentDeadline = 0.0
     private var gestures = ForegroundGestureSession()
     private var activation = ShortcutActivation()
     private var activationTimeoutTask: Task<Void,Never>?
@@ -52,12 +70,28 @@ final class MotionController: ObservableObject {
             }
             self.actionStatus = "Synced: \(config.selectedProfile.name)"; self.actionFailed = false
         }
+        if let data = UserDefaults.standard.data(forKey:"fingerTapModel"),
+           let model = try? JSONDecoder().decode(FingerTapModel.self,from:data), model.isValid, model.validated {
+            tapModel = model; tapEnrollmentStatus = "Personalized single tap enabled"
+        }
+        volume.didBegin = { [weak self] in
+            guard let self, self.volumeClaimed, let motion = self.lastMotion, let level = self.volume.acknowledged else { return }
+            self.tracker.begin(volume:level,acceleration:motion.acceleration,gravity:motion.gravity,time:motion.time)
+            self.haptic(.click)
+        }
+        volume.didFinish = { [weak self] in
+            guard let self, self.volumeClaimed else { return }
+            self.gestures.reset(); self.armed = false; self.armRemaining = 0
+            self.status = self.volume.message
+            if self.volume.state == .locked { self.haptic(.success) }
+        }
         configureEngine()
     }
     private func configureEngine() {
         armExpiryTask?.cancel(); armExpiryTask = nil
+        if volume.ownsMotion { volume.finish(lock:false) }
+        volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; viewingSince = nil; pendingMotion = []
         gestures.reset()
-        gestures.engine.requireWake = configuration.requireWake
         gestures.engine.threshold = configuration.threshold
         gestures.engine.armSeconds = configuration.armSeconds
         armed = false; armRemaining = 0
@@ -74,6 +108,12 @@ final class MotionController: ObservableObject {
                 do { try await Task.sleep(for:.seconds(1)) } catch { return }
                 guard let self, let end = self.sessionEnd else { return }
                 if Date() >= end { self.stop("Session ended after 30 minutes"); return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if self.volume.ownsMotion && now-self.lastDelivery > 0.25 { self.endVolume(lock:false) }
+                if self.enrollmentRecording {
+                    self.enrollmentRemaining = max(0,Int(ceil(self.enrollmentDeadline-now)))
+                    if now-self.lastDelivery > 0.25 { self.cancelEnrollment("Recording interrupted - repeat this step") }
+                }
             }
         }
         resume()
@@ -83,39 +123,78 @@ final class MotionController: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         if activation.expire(at:now) { stop("Activation timed out · activate again"); return }
         guard let end = sessionEnd, Date() < end else { stop("Session expired — start again"); return }
-        guard manager.isDeviceMotionAvailable else { stop("Motion unavailable on this device"); return }
+        guard manager.isDeviceMotionAvailable, manager.isAccelerometerAvailable else { stop("Motion unavailable on this device"); return }
         configureEngine(); firstSample = nil; samples = 0; lastDisplay = 0; buffer = []; sampleRate = 0
         generation += 1; let capture = generation
         activation.beginCapture(at:now)
         running = true
-        status = activation.isPending ? "Hold still · preparing gestures" : (configuration.requireWake ? "Double twist to wake" : "Ready for a gesture")
-        manager.deviceMotionUpdateInterval = 1.0/50
-        manager.startDeviceMotionUpdates(to:.main) { [weak self] motion,error in
-            guard let motion else {
-                Task { @MainActor [weak self] in
-                    guard let self, self.generation == capture else { return }
-                    self.stop(error?.localizedDescription ?? "Motion unavailable")
-                }; return
-            }
-            let t = motion.timestamp, roll = motion.attitude.roll, pitch = motion.attitude.pitch, yaw = motion.attitude.yaw
-            let a = motion.userAcceleration, r = motion.rotationRate, g = motion.gravity
-            Task { @MainActor [weak self] in
+        status = activation.isPending ? "Hold still - preparing gestures" : "Activate Wizardry or tap Arm"
+        lastAccepted = nil; lastMotion = nil
+        let worker = MotionCapture(); self.capture = worker
+        worker.reset(model:tapModel)
+        worker.motionDelivered = { [weak self] sample in
+            Task { @MainActor in
                 guard let self, self.running, self.generation == capture else { return }
-                self.consume(time:t,roll:roll,pitch:pitch,yaw:yaw,ax:a.x,ay:a.y,az:a.z,rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z)
+                self.consume(sample)
             }
         }
+        worker.tapDelivered = { [weak self] output in
+            Task { @MainActor in
+                guard let self, self.running, self.generation == capture,
+                      ProcessInfo.processInfo.systemUptime >= self.ignoreTapsUntil else { return }
+                self.tapFrozen = output.frozen
+                if output.observation?.recognized == true, let motion = self.lastMotion {
+                    self.pendingMotion = []; self.tracker.freeze(at:motion.time)
+                }
+                if output.event != nil, self.volumeClaimed, self.volume.state == .adjusting { self.endVolume(lock:true) }
+            }
+        }
+        worker.enrollmentDelivered = { [weak self] learning,complete in
+            Task { @MainActor in
+                guard let self, self.generation == capture, self.enrollmentRecording else { return }
+                self.enrollmentRecording = false; self.enrollment = learning
+                if !complete { self.tapEnrollmentStatus = "Recording interrupted or below 70 Hz - repeat this step" }
+                else if learning.stage == .complete {
+                    self.tapEnrollmentStatus = learning.report
+                    if let model = learning.model, model.isValid, model.validated {
+                        self.tapModel = model
+                        if let data = try? JSONEncoder().encode(model) { UserDefaults.standard.set(data,forKey:"fingerTapModel") }
+                    }
+                } else { self.tapEnrollmentStatus = "Step recorded - prepare for the next step" }
+                self.capture?.reset(model:self.tapModel)
+            }
+        }
+        manager.deviceMotionUpdateInterval = 1.0/100
+        manager.accelerometerUpdateInterval = 1.0/100
+        manager.startDeviceMotionUpdates(to:worker.queue) { [weak self] motion,error in
+            if let motion { worker.accept(motion) }
+            else { Task { @MainActor in
+                guard let self, self.generation == capture else { return }
+                self.stop(error?.localizedDescription ?? "Motion unavailable")
+            } }
+        }
+        manager.startAccelerometerUpdates(to:worker.queue) { [weak self] sample,error in
+            if let sample { worker.accept(sample) }
+            else { Task { @MainActor in
+                guard let self, self.generation == capture else { return }
+                self.stop(error?.localizedDescription ?? "Raw acceleration unavailable")
+            } }
+        }
     }
+
     func pause(_ message: String = "Paused · raise wrist to resume") {
         cancelShortcutActivation()
         suspendCapture(message)
     }
     private func suspendCapture(_ message: String) {
-        generation += 1; manager.stopDeviceMotionUpdates(); running = false; buffer = []; configureEngine()
+        cancelEnrollment("Recording interrupted - repeat this step")
+        capture?.cancelEnrollment()
+        generation += 1; manager.stopDeviceMotionUpdates(); manager.stopAccelerometerUpdates(); running = false; buffer = []; configureEngine()
         if sessionActive { status = message }
     }
     func setScenePhase(_ phase: ForegroundGestureSession.Phase) {
         let now = ProcessInfo.processInfo.systemUptime
-        let canContinue = gestures.transition(to:phase,at:now)
+        let canContinue = gestures.transition(to:phase,at:now) || (phase == .inactive && volume.ownsMotion)
         if phase == .active {
             resume()
             if running { updateArmDisplay(at:now) }
@@ -136,7 +215,12 @@ final class MotionController: ObservableObject {
     }
     func navigationChanged() {
         if navigationPath.last == .nowPlaying { pause("Paused for Now Playing") }
-        else { resume() }
+        else if navigationPath.last == .enrollment {
+            cancelShortcutActivation(); endVolume(lock:false); gestures.reset(); armed = false
+            if !sessionActive { start() } else { resume() }
+        } else {
+            cancelEnrollment("Enrollment paused"); capture?.reset(model:tapModel); resume()
+        }
     }
     func activateFromShortcut() {
         // Invalidate queued sensor callbacks as well as any earlier launch request.
@@ -164,12 +248,39 @@ final class MotionController: ObservableObject {
     }
     func arm() {
         guard gestures.phase == .active else { return }
-        cancelShortcutActivation()
+        activateFromShortcut()
+    }
+    func endVolume(lock: Bool) {
+        guard volumeClaimed else { return }
+        volume.finish(lock:lock); gestures.reset(); armed = false; armRemaining = 0
+        armExpiryTask?.cancel(); status = volume.message
+    }
+    func startEnrollmentStep() {
+        guard gestures.phase == .active, !enrollmentRecording else { return }
+        if enrollment.stage == .complete { enrollment = TapEnrollment() }
         if !sessionActive { start() }
         guard running else { return }
-        gestures.engine.arm(time:ProcessInfo.processInfo.systemUptime)
-        scheduleArmExpiry(); armed = true; status = "Return to neutral, then act"
-        WKInterfaceDevice.current().play(.success)
+        endVolume(lock:false); gestures.reset(); armed = false
+        enrollmentRecording = true
+        enrollmentDeadline = ProcessInfo.processInfo.systemUptime+enrollment.stage.duration
+        enrollmentRemaining = Int(enrollment.stage.duration)
+        tapEnrollmentStatus = "Recording - " + enrollment.stage.instruction
+        capture?.startEnrollmentStage(enrollment,at:ProcessInfo.processInfo.systemUptime)
+    }
+    private func cancelEnrollment(_ message: String) {
+        if enrollmentRecording { enrollmentRecording = false; tapEnrollmentStatus = message }
+        capture?.cancelEnrollment()
+    }
+    func resetTapEnrollment() {
+        cancelEnrollment("Single tap disabled - enroll again"); tapModel = nil; enrollment = TapEnrollment()
+        UserDefaults.standard.removeObject(forKey:"fingerTapModel"); capture?.reset(model:nil)
+        tapEnrollmentStatus = "Single tap disabled - enroll first"
+    }
+    private func haptic(_ type: WKHapticType) {
+        let now = ProcessInfo.processInfo.systemUptime
+        ignoreTapsUntil = now+0.35; tapFrozen = false
+        capture?.suppressHaptic(at:now)
+        WKInterfaceDevice.current().play(type)
     }
     private func scheduleArmExpiry() {
         armExpiryTask?.cancel()
@@ -195,73 +306,101 @@ final class MotionController: ObservableObject {
     private func updateArmDisplay(at now: Double) {
         armed = gestures.engine.isArmed(at:now)
         armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
-        if activation.isPending { status = "Hold still · preparing gestures" }
+        if volumeClaimed { status = volume.message }
+        else if activation.isPending { status = "Hold still · preparing gestures" }
         else if armed { status = "Armed · \(armRemaining)s" }
-        else { status = configuration.requireWake ? "Double twist to wake" : "Ready for a gesture" }
+        else { status = "Activate Wizardry or tap Arm" }
     }
-    func testHaptic() { WKInterfaceDevice.current().play(.click) }
-    private func consume(time: Double,roll: Double,pitch: Double,yaw: Double,ax: Double,ay: Double,az: Double,rx: Double,ry: Double,rz: Double,gx: Double,gy: Double,gz: Double) {
-        guard let end = sessionEnd, Date() < end else { stop("Session expired — start again"); return }
-        let acceleration = sqrt(ax*ax+ay*ay+az*az)
-        let now = ProcessInfo.processInfo.systemUptime
-        gestures.expireArm(at:now)
-        guard gestures.allowsMotion(at:now) else {
-            pause("Paused · raise wrist to resume")
-            return
+    func testHaptic() { haptic(.click) }
+    private func consume(_ motion: CapturedMotion) {
+        let time = motion.time, now = ProcessInfo.processInfo.systemUptime
+        guard let end = sessionEnd, Date() < end else { stop("Session expired - start again"); return }
+        guard [time,motion.roll,motion.pitch,motion.yaw,now].allSatisfy(\.isFinite),
+              motion.acceleration.isFinite, motion.rotation.isFinite, motion.gravity.isFinite,
+              motion.attitude.normal != nil, time <= now, now-time <= 0.25,
+              lastAccepted.map({time > $0}) ?? true else {
+            if volumeClaimed { endVolume(lock:false) }
+            gestures.engine.interruptMotion(at:now); return
         }
-        var gestureEvent: GestureEngine.Event?
-        if activation.isPending {
-            // Never feed launch motion to the action recognizer, even with wake disabled.
-            let event = activation.update(roll:roll,pitch:pitch,acceleration:acceleration,
-                                          rotationRate:sqrt(rx*rx+ry*ry+rz*rz),sampleTime:time,
-                                          now:now)
-            switch event {
-            case .ready:
-                cancelShortcutActivation()
-                gestures.calibrateAndArm(roll:roll,pitch:pitch,sampleTime:time,readyTime:now)
-                scheduleArmExpiry()
-                armed = true; armRemaining = Int(ceil(configuration.armSeconds))
-                status = "Ready · make a gesture"
-                WKInterfaceDevice.current().play(.success)
-            case .timedOut: stop("Activation timed out · activate again"); return
-            case .invalidMotion: stop("Motion unavailable · activate again"); return
-            case nil: break
-            }
-            // The calibration helper also rejects stale delivery. Do not publish
-            // those buffered frames as fresh live telemetry while waiting.
-            guard time <= now, now - time <= 0.25 else { buffer = []; sampleRate = 0; return }
-        } else {
-            let result = gestures.update(roll:roll,pitch:pitch,acceleration:acceleration,sampleTime:time,now:now)
-            guard result.accepted else {
-                buffer = []; sampleRate = 0; firstSample = nil; samples = 0
-                if !gestures.allowsMotion(at:now) { pause("Motion interrupted · raise wrist to resume") }
-                else { updateArmDisplay(at:now) }
-                return
-            }
-            gestureEvent = result.event
+        if let previous = lastAccepted, time-previous > 0.25 {
+            if volumeClaimed { endVolume(lock:false) }
+            gestures.engine.interruptMotion(at:now)
+            cancelEnrollment("Recording interrupted - repeat this step")
         }
+        lastAccepted = time; lastDelivery = now; lastMotion = motion
         if firstSample == nil { firstSample = time }
         samples += 1
-        if let event = gestureEvent {
-            switch event {
-            case .woke:
-                scheduleArmExpiry()
-                WKInterfaceDevice.current().play(.success); status = "Return to neutral, then act"
-            case .action(let gesture):
-                guard let binding = configuration.selectedProfile.bindings.first(where:{$0.gesture == gesture && $0.enabled}) else { return }
-                count += 1; lastGesture = gesture.title; WKInterfaceDevice.current().play(.click)
-                if binding.action == .haptic { actionStatus = "Haptic only"; actionFailed = false }
-                else { send(gesture) }
+        let acceleration = motion.acceleration.length, rotation = motion.rotation.length
+        var gestureEvent: GestureEngine.Event?
+        if navigationPath.last == .enrollment {
+            // Enrollment never executes computer or other mapped commands.
+        } else if activation.isPending {
+            switch activation.update(roll:motion.roll,pitch:motion.pitch,acceleration:acceleration,
+                                     rotationRate:rotation,sampleTime:time,now:now) {
+            case .ready:
+                cancelShortcutActivation()
+                gestures.calibrateAndArm(roll:motion.roll,pitch:motion.pitch,sampleTime:time,readyTime:now)
+                arbiter.calibrate(motion.attitude); capture?.reset(model:tapModel)
+                scheduleArmExpiry(); armed = true; status = "Ready - extend arm or make a gesture"
+                haptic(.success)
+            case .timedOut: stop("Activation timed out - activate again"); return
+            case .invalidMotion: stop("Invalid motion - activate again"); return
+            case nil: break
+            }
+        } else if volumeClaimed {
+            if volume.state == .adjusting {
+                if now < ignoreTapsUntil || arbiter.isViewing(motion.attitude) {
+                    tracker.freeze(at:time); pendingMotion = []
+                } else if tapFrozen {
+                    pendingMotion.append(motion)
+                    if pendingMotion.count > 80 { pendingMotion = []; endVolume(lock:false) }
+                } else {
+                    for frame in pendingMotion + [motion] {
+                        _ = tracker.update(acceleration:frame.acceleration,gravity:frame.gravity,
+                                           rotation:frame.rotation.length,time:frame.time)
+                    }
+                    pendingMotion = []; volume.setTarget(tracker.target)
+                }
+                if arbiter.isViewing(motion.attitude) {
+                    if viewingSince == nil { viewingSince = time }
+                    if time-(viewingSince ?? time) >= 0.25 { endVolume(lock:false) }
+                } else { viewingSince = nil }
+                if time-tracker.lastMovement >= 5 { endVolume(lock:false) }
+            }
+        } else {
+            gestures.expireArm(at:now)
+            guard gestures.allowsMotion(at:now) else { pause("Activate again to resume"); return }
+            var suppress = volume.ownsMotion
+            if configuration.selectedProfileID == "computer", gestures.engine.isArmed(at:now) {
+                let route = arbiter.update(attitude:motion.attitude,acceleration:acceleration,rotation:rotation,time:time)
+                suppress = suppress || route != .legacy
+                if route == .enterVolume, !volume.ownsMotion {
+                    volumeClaimed = true; armExpiryTask?.cancel(); armed = false; armRemaining = 0
+                    gestures.reset(); tapFrozen = false; viewingSince = nil
+                    volume.begin(revision:configuration.revision)
+                }
+            }
+            if !volumeClaimed {
+                let result = gestures.update(roll:motion.roll,pitch:motion.pitch,acceleration:acceleration,
+                                             sampleTime:time,now:now,suppressActions:suppress)
+                if result.accepted { gestureEvent = result.event }
             }
         }
+        if let event = gestureEvent, case .action(let gesture) = event,
+           let binding = configuration.selectedProfile.bindings.first(where:{$0.gesture == gesture && $0.enabled}) {
+            count += 1; lastGesture = gesture.title; haptic(.click)
+            if binding.action == .haptic { actionStatus = "Haptic only"; actionFailed = false }
+            else { send(gesture) }
+        }
         if time-lastDisplay >= 0.1 {
-            updateArmDisplay(at:now)
-            rollDegrees = gestures.engine.relativeRoll*180 / .pi
+            updateArmDisplay(at:now); rollDegrees = gestures.engine.relativeRoll*180 / .pi
             let elapsed = time-(firstSample ?? time); sampleRate = elapsed > 0 ? Double(samples-1)/elapsed : 0
             lastDisplay = time
             if Date().timeIntervalSince1970 < link.streamUntil {
-                buffer.append(.init(time:Date().timeIntervalSince1970,roll:gestures.engine.relativeRoll,pitch:gestures.engine.relativePitch,yaw:yaw,
-                    ax:ax,ay:ay,az:az,rx:rx,ry:ry,rz:rz,gx:gx,gy:gy,gz:gz,hz:sampleRate,state:status))
+                let a = motion.acceleration, r = motion.rotation, g = motion.gravity
+                buffer.append(.init(time:Date().timeIntervalSince1970,roll:gestures.engine.relativeRoll,
+                                    pitch:gestures.engine.relativePitch,yaw:motion.yaw,ax:a.x,ay:a.y,az:a.z,
+                                    rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z,hz:sampleRate,state:status))
                 if buffer.count >= 5 { link.sendFrames(buffer); buffer = [] }
             } else { buffer = [] }
         }
@@ -273,7 +412,7 @@ final class MotionController: ObservableObject {
         link.send(event) { [weak self] result in
             guard let self,self.actionID == event.id else { return }
             self.actionID = nil; self.actionStatus = result.message; self.actionFailed = result.outcome == .failed
-            if result.outcome == .failed { WKInterfaceDevice.current().play(.failure) }
+            if result.outcome == .failed { self.haptic(.failure) }
         }
         Task { [weak self] in
             try? await Task.sleep(for:.seconds(8))

@@ -28,7 +28,7 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 - [ ] Both updated apps are installed. On iPhone, Shortcuts exposes Wizardry's **Start Wizardry session** action. Create **Activate Wizardry**, enable **Show on Apple Watch**, and verify it syncs to the watch.
 - [ ] Running the shortcut on iPhone explains that it must run on Apple Watch; it does not claim to have activated watch sensing.
 - [ ] Run the synced shortcut once on the watch and complete any system prompts. Confirm it opens Wizardry and gives one ready haptic after holding still.
-- [ ] Enable AssistiveTouch/Hand Gestures and assign Double Clench to Activate Wizardry. Record the watchOS version, available Activation Gesture settings, and actual gesture sequence. If None is unavailable, test the separate AssistiveTouch activation gesture.
+- [ ] Enable AssistiveTouch/Hand Gestures and assign double finger touch to Activate Wizardry. Record the watchOS version, available Activation Gesture settings, and actual gesture sequence. If None is unavailable, test the separate AssistiveTouch activation gesture.
 - [ ] From the watch face with Wizardry not running, raise and perform the configured gesture. No screen tap or four-twist wake is needed. Record gesture-to-ready latency and repeatability.
 - [ ] Repeat from a suspended Wizardry, an active/armed session, the Gesture guide, and Now Playing. Each invocation returns to the control screen and recalibrates once, without duplicate ready haptics or sensor streams.
 - [ ] Move continuously during launch: no mapped action occurs, and after ten seconds activation times out. Hold still after retrying: the ready haptic occurs only after calibration and the full configured armed window is available.
@@ -61,3 +61,6 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 ## Evidence boundary
 
 Automated tests cover deterministic state transitions, command/replay checks, receiver behavior, packaging, and native UI navigation. Real paired transport, accessory changes, authorization, and sensing accuracy require the checks above. Leave unchecked until physically tested.
+
+
+Live computer volume, learned single-touch setup, and physical acceptance checks are described in [LIVE_VOLUME.md](LIVE_VOLUME.md). Keep AssistiveTouch single finger touch assigned to **None**; double touch runs **Activate Wizardry**. The separate twist-to-wake mechanism has been removed.

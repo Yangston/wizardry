@@ -109,10 +109,9 @@ struct MotionMappings: View {
                         }
                     }
                 }
-                Section("Wake and sensitivity") {
-                    Toggle("Require double-twist wake",isOn:$store.configuration.requireWake)
-                        .onChange(of:store.configuration.requireWake) { _,_ in store.saveConfiguration() }
-                    Text("Wake is four alternating twists: + / − / + / −, or the reverse, within 2.5 seconds. Return to neutral before your action. Direction depends on your wrist and watch orientation; check Live.").font(.caption)
+                Section("Activation and sensitivity") {
+                    Text("Double finger touch runs your AssistiveTouch Activate Wizardry shortcut. Hold still facing the watch for the ready haptic. The Arm button also works. There is no double-twist wake.").font(.caption)
+                    Text("Computer volume: extend until the watch face turns about 90°, then raise/lower in short strokes. Learn single finger tap on the watch to lock; keep AssistiveTouch single touch at None. Experimental height estimates can drift.").font(.caption)
                     VStack(alignment:.leading) {
                         Text("Action angle: \(Int(store.configuration.threshold * 180 / .pi))°")
                         Slider(value:$store.configuration.threshold,in:0.45...1.2,step:0.05,onEditingChanged: { if !$0 { store.saveConfiguration() } })

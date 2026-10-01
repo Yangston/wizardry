@@ -1,17 +1,14 @@
 ﻿import Foundation
 
-/// Relative-angle gestures with a deliberate four-excursion wake sequence.
-/// A wake only arms; it never triggers an action. All times are monotonic seconds.
+/// Relative-angle gestures; only explicit shortcut/button activation arms.
+/// All times are monotonic seconds. Legacy saved requireWake keys are ignored.
 struct GestureEngine {
-    enum Event: Equatable { case woke, action(GestureKind) }
+    enum Event: Equatable { case action(GestureKind) }
     private(set) var relativeRoll = 0.0
     private(set) var relativePitch = 0.0
     private(set) var armedUntil = -Double.infinity
     private var baseline: (Double, Double)?
     private var lastTime: Double?
-    private var wakeSigns: [Int] = []
-    private var wakeStarted = 0.0
-    private var lastSign = 0
     private var mustSettle = true
     private var neutralSince: Double?
     private var candidate: GestureKind?
@@ -19,15 +16,14 @@ struct GestureEngine {
     private var lastFire = -Double.infinity
     private var firstShake: Double?
     private var aboveShake = false
-    var requireWake = true
     var threshold = 0.65
     var armSeconds = 8.0
 
     var isArmed: Bool { (lastTime ?? 0) < armedUntil }
     func isArmed(at time: Double) -> Bool { time.isFinite && time < armedUntil }
     mutating func reset() {
-        let wake = requireWake, angle = threshold, seconds = armSeconds
-        self = Self(); requireWake = wake; threshold = angle; armSeconds = seconds
+        let angle = threshold, seconds = armSeconds
+        self = Self(); threshold = angle; armSeconds = seconds
     }
     /// Discard incomplete gestures after a delivery interruption, retaining the
     /// calibrated neutral position, cooldown, and only the unexpired arm deadline.
@@ -41,7 +37,6 @@ struct GestureEngine {
     mutating func arm(time: Double) {
         armedUntil = time + armSeconds
         mustSettle = true; neutralSince = nil; candidate = nil; firstShake = nil
-        wakeSigns = []; lastSign = 0
     }
     /// Only call after the launcher has observed a stable wrist for 250 ms.
     /// The ready haptic means the next deliberate gesture can act immediately.
@@ -53,7 +48,7 @@ struct GestureEngine {
         arm(time: readyTime)
         mustSettle = false
     }
-    mutating func update(roll: Double, pitch: Double, acceleration: Double, time: Double) -> Event? {
+    mutating func update(roll: Double, pitch: Double, acceleration: Double, time: Double, suppressActions: Bool = false) -> Event? {
         guard [roll,pitch,acceleration,time].allSatisfy(\.isFinite) else { reset(); return nil }
         if let previous = lastTime, time <= previous || time - previous > 0.25 { reset() }
         lastTime = time
@@ -61,15 +56,13 @@ struct GestureEngine {
         relativeRoll = atan2(sin(roll-origin.0), cos(roll-origin.0))
         relativePitch = atan2(sin(pitch-origin.1), cos(pitch-origin.1))
         let neutral = abs(relativeRoll) < 0.18 && abs(relativePitch) < 0.18 && acceleration < 0.35
-        if requireWake && !isArmed {
+        if !isArmed {
             mustSettle = true; candidate = nil; firstShake = nil
-            if time - wakeStarted > 2.5 { wakeSigns = []; lastSign = 0 }
-            let sign = relativeRoll > 0.45 ? 1 : (relativeRoll < -0.45 ? -1 : 0)
-            if sign != 0 && sign != lastSign {
-                if wakeSigns.isEmpty { wakeStarted = time }
-                wakeSigns.append(sign); lastSign = sign
-                if wakeSigns.count == 4 { arm(time: time); return .woke }
-            }
+            // Transitions must not consume a gesture or replace its neutral pose.
+            return nil
+        }
+        if suppressActions {
+            candidate = nil; firstShake = nil; aboveShake = false; neutralSince = nil
             return nil
         }
         if mustSettle {

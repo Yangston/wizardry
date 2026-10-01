@@ -93,7 +93,6 @@ struct WizardryConfiguration: Codable, Equatable {
     var schema = 1
     var revision = UUID().uuidString
     var selectedProfileID = "computer"
-    var requireWake = true
     var threshold = 0.65
     var armSeconds = 8.0
     var profiles: [ControlProfile] = [

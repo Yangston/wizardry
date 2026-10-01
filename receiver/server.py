@@ -10,6 +10,7 @@ import secrets
 import ssl
 import time
 import uuid
+from live_volume import LiveVolumeProcessor
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 KEY_CODES = {"volume_up": 0xAF, "volume_down": 0xAE, "mute": 0xAD,
@@ -28,6 +29,14 @@ class CommandProcessor:
         self.volume_action = volume_action or windows_volume
         self.seen = {}
         self.last_action = float("-inf")
+        self.live_volume = LiveVolumeProcessor(execute=execute, clock=clock)
+
+    def handle_volume(self, authorization, payload):
+        if not hmac.compare_digest(authorization.encode(), ("Bearer " + self.token).encode()):
+            return 401, {"error": "Unauthorized"}
+        if not isinstance(payload, dict):
+            return 400, {"error": "Expected JSON object"}
+        return self.live_volume.handle(payload)
 
     def handle(self, authorization, payload):
         if not hmac.compare_digest(authorization.encode(), ("Bearer " + self.token).encode()):
@@ -74,7 +83,7 @@ def windows_volume(command):
 def handler_for(processor):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path != "/command":
+            if self.path not in ("/command", "/volume"):
                 self.reply(404, {"error": "Not found"})
                 return
             try:
@@ -87,11 +96,12 @@ def handler_for(processor):
                 self.reply(400, {"error": "Invalid JSON"})
                 return
             try:
-                status, body = processor.handle(self.headers.get("Authorization", ""), payload)
+                dispatch = processor.handle_volume if self.path == "/volume" else processor.handle
+                status, body = dispatch(self.headers.get("Authorization", ""), payload)
             except Exception:
                 self.reply(500, {"error": "Command execution failed"})
                 return
-            if status == 200:
+            if status == 200 and self.path == "/command":
                 print(f"{body['command']}: {'executed' if body['executed'] else 'dry run / ping'}", flush=True)
             self.reply(status, body)
 

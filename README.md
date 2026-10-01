@@ -5,8 +5,8 @@ A native iPhone and Apple Watch gesture remote, developed on Windows and built w
 ## Wave one · 0.2
 
 - **iPhone companion:** set up your computer, connect Apple Home and Spotify, select a profile, and edit every gesture-to-action mapping.
-- **Watch:** touch-free AssistiveTouch/Shortcut launch with hold-still calibration and automatic arming, a 30-minute control session, deliberate double-twist wake for manual use, an eight-second armed window, Double Tap on supported watches, and native Now Playing controls.
-- **Live motion:** graphs and numeric values for acceleration, rotation rate, relative roll/pitch, yaw, and gravity. About 50 Hz capture, 10 Hz display, bounded local buffers, and explicit stale status.
+- **Watch:** touch-free AssistiveTouch/Shortcut launch with hold-still calibration and automatic arming, a 30-minute control session, explicit shortcut/button arming, experimental live computer volume and learned single-touch locking, an eight-second armed window, Double Tap on supported watches, and native Now Playing controls.
+- **Live motion:** graphs and numeric values for acceleration, rotation rate, relative roll/pitch, yaw, and gravity. Requested 100 Hz capture (actual hardware rate displayed), 10 Hz display, bounded local buffers, and explicit stale status.
 - **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page.
 - **Phone:** Spotify playback on the active player, Apple Music controls, a locator chime, native volume slider, and named Shortcuts.
 - **Apple Home:** select existing lights, switches, Matter plugs, or scenes. No separate Matter commissioning is required.
@@ -27,9 +27,11 @@ See [release and account setup](docs/SETUP.md) and [the first-wave device checkl
 
 ## Raise · Wake · Act
 
-**Touch-free entry:** configure [AssistiveTouch launch](docs/SETUP.md#assistivetouch-launch), then **raise wrist → Double Clench → hold still → ready haptic → wrist action**. The shortcut opens Wizardry's control screen, starts a 30-minute session, and arms after 250 ms of steady motion. The configured armed window starts when calibration completes; the launch gesture cannot also execute an action. Return to neutral between actions. Repeat the shortcut whenever you need to open and arm Wizardry again.
+**Touch-free entry:** configure [AssistiveTouch launch](docs/SETUP.md#assistivetouch-launch), then **raise wrist → double finger touch → hold still → ready haptic → wrist action**. The shortcut opens Wizardry's control screen, starts a 30-minute session, and arms after 250 ms of steady motion. The configured armed window starts when calibration completes; the launch gesture cannot also execute an action. Return to neutral between actions. Repeat the shortcut whenever you need to open and arm Wizardry again.
 
-**Manual entry:** start a session on the Watch. Hold still for calibration. With Wizardry frontmost, twist **+ / − / + / −** (or the reverse) within **2.5 seconds**. A double haptic arms the watch. Return to neutral briefly, then make the action gesture within the armed window.
+**Manual entry:** tap **Arm**, hold still while looking at the watch, and wait for the ready haptic. There is no separate twist-to-wake sequence.
+
+**Live computer volume (experimental):** with the Computer profile selected, extend your arm until the watch face is roughly perpendicular to the calibrated viewing pose. After the entry haptic, raise/lower your hand in short strokes with pauses. Volume follows estimated vertical displacement, starting at the actual Windows volume. A personalized single finger touch or the **Lock volume** button stops adjustment; five seconds without movement also ends it. Keep AssistiveTouch single touch at **None**. Requested and acknowledged volume are shown separately. See [enrollment, protocol, and pending hardware validation](docs/LIVE_VOLUME.md).
 
 | Motion | Computer default | Phone default | Home default |
 |---|---|---|---|
@@ -43,9 +45,9 @@ Home targets start unassigned: choose them before testing. Gesture directions de
 
 ## Runtime and platform limits
 
-**This is not always-on background recognition.** During an already-armed window, brief inactive/dimmed foreground transitions retain the same neutral position and original expiry time. Recognition continues only while fresh motion samples arrive; Wizardry does not keep the display awake or request extra background runtime. Samples more than 250 ms old, future timestamps, duplicates, and out-of-order samples are rejected. Delivery gaps clear incomplete gestures and require returning to neutral before another action; they never extend the armed window. Sensor errors, stopping, changed settings, Now Playing, and actually backgrounding the app still disarm it. Unarmed detection pauses when the app becomes inactive, including when Require Wake is disabled.
+**This is not always-on background recognition.** During an already-armed window, brief inactive/dimmed foreground transitions retain the same neutral position and original expiry time. Recognition continues only while fresh motion samples arrive; Wizardry does not keep the display awake or request extra background runtime. Samples more than 250 ms old, future timestamps, duplicates, and out-of-order samples are rejected. Delivery gaps clear incomplete gestures and require returning to neutral before another action; they never extend the armed window. Sensor errors, stopping, changed settings, Now Playing, and actually backgrounding the app still disarm it. Unarmed detection pauses when the app becomes inactive, regardless of saved legacy wake settings.
 
-During an active 30-minute session, returning after disarming requires wake/arm again unless explicitly disabled. The AssistiveTouch shortcut or Siri's “Start Wizardry” opens and arms a fresh session after hold-still calibration. A shortcut activation expires after ten seconds if launch/calibration cannot complete. Becoming inactive during calibration still cancels activation; an ordinary wrist raise cannot replay it. Set Watch **Settings → General → Return to Clock → After 1 hour** for a reading session. If rolling returns you to the watch face, try **Settings → Gestures → Wrist Flick → Off**. Inactive motion delivery must be tested on hardware; suspension can still interrupt a gesture.
+During an active 30-minute session, returning after disarming requires shortcut/button activation again. The AssistiveTouch shortcut or Siri's “Start Wizardry” opens and arms a fresh session after hold-still calibration. A shortcut activation expires after ten seconds if launch/calibration cannot complete. Becoming inactive during calibration still cancels activation; an ordinary wrist raise cannot replay it. Set Watch **Settings → General → Return to Clock → After 1 hour** for a reading session. If rolling returns you to the watch face, try **Settings → Gestures → Wrist Flick → Off**. Inactive motion delivery must be tested on hardware; suspension can still interrupt a gesture.
 
 AssistiveTouch requires one-time user setup and replaces Apple's standard Double Tap. With AssistiveTouch off, standard Double Tap activates Arm while Wizardry is visible on supported watches. No fake workouts or continuous silent audio are used. Shortcut discovery, gesture launch, and end-to-end action delivery remain subject to the [physical-device checks](docs/WAVE_ONE.md).
 
@@ -55,7 +57,7 @@ AssistiveTouch requires one-time user setup and replaces Apple's standard Double
 
 **Home:** access must be granted on the phone; accessory reachability depends on the Home network and hub. Only light/outlet/switch power characteristics are enumerated. Home scenes are explicitly selected by the user.
 
-A recognition haptic confirms a gesture, not successful execution. The watch and phone display target acknowledgements, dry runs, handoffs, and errors separately. Commands expire after five seconds and are never queued for later execution or automatically retried.
+A recognition haptic confirms a gesture, not successful execution. The watch and phone display target acknowledgements, dry runs, handoffs, and errors separately. Discrete commands expire after five seconds; live volume messages expire after one second. Both are never queued for later execution or automatically retried.
 
 ## Privacy and pairing
 

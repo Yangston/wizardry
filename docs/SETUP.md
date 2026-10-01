@@ -31,23 +31,23 @@ This is a one-time installation-order migration; subsequent paired-app builds up
 
 ## AssistiveTouch launch
 
-The intended flow is **raise wrist → Double Clench → hold still → ready haptic → wrist action**, with no screen tap after setup. Install the updated app on **both iPhone and Apple Watch** first and open each once for setup and permissions.
+The intended flow is **raise wrist → double finger touch → hold still → ready haptic → wrist action**, with no screen tap after setup. Install the updated app on **both iPhone and Apple Watch** first and open each once for setup and permissions.
 
 1. On iPhone, open **Shortcuts**, create a shortcut named **Activate Wizardry**, and add Wizardry's **Start Wizardry session** action. Use that action, not the generic Open App action, so the watch also calibrates and arms.
 2. In the shortcut's details, enable **Show on Apple Watch**. Let it sync and check that Activate Wizardry appears in Shortcuts on the watch. Run it there once and complete any system permission prompts.
 3. On the watch, enable **Settings → Accessibility → AssistiveTouch → Hand Gestures**.
-4. Select **Double Clench**, choose the Siri Shortcut **Activate Wizardry**, and set **Activation Gesture → None** if that option is available on the installed watchOS version. Otherwise, perform the configured AssistiveTouch activation gesture first, then Double Clench to run the shortcut. Menu wording may vary by watchOS version.
-5. From the watch face, raise your wrist, perform the configured gesture, and hold still until Wizardry gives its ready haptic. Then make your twist, tilt, or shake action. You do not need the four-twist wake sequence after shortcut activation. Return to neutral between actions.
+4. Select **double finger touch**, choose the Siri Shortcut **Activate Wizardry**, and set **Activation Gesture → None** if that option is available on the installed watchOS version. Otherwise, perform the configured AssistiveTouch activation gesture first, then double finger touch to run the shortcut. Menu wording may vary by watchOS version.
+5. From the watch face, raise your wrist, perform the configured gesture, and hold still until Wizardry gives its ready haptic. Then make your twist, tilt, or shake action. The separate twist-to-wake sequence has been removed. Return to neutral between actions.
 
 The action is exposed in both apps so it can be configured on iPhone, but **execute it on Apple Watch**. Running it on iPhone displays an instruction to use the watch; it does not remotely launch the watch app. If the action is missing, confirm both updated apps are installed and have been opened, then recheck Shortcuts discovery. Do not substitute a phone-only Open App shortcut.
 
 Wizardry waits for 250 ms of low acceleration and rotation before calibrating the current wrist position and starting the configured armed window. Repeating the shortcut starts a fresh 30-minute session and restarts calibration. Launch motion cannot trigger a mapped action. A ready haptic means gesture input is ready, not that the iPhone, music player, computer, or Home target has acknowledged an action.
 
-If launch or calibration takes ten seconds, Wizardry cancels the activation and asks you to activate again. Lowering your wrist or leaving the app after calibration starts, stopping the session, changing settings, or losing the motion sensor cancels pending activation. Raising your wrist later does not replay that request. When Wizardry is already frontmost, its existing manual wake/arm controls remain available.
+If launch or calibration takes ten seconds, Wizardry cancels the activation and asks you to activate again. Lowering your wrist or leaving the app after calibration starts, stopping the session, changing settings, or losing the motion sensor cancels pending activation. Raising your wrist later does not replay that request. When Wizardry is already frontmost, its Arm button remains available.
 
 AssistiveTouch replaces Apple's standard Double Tap and must be configured by the user; Wizardry cannot change those system settings. It launches **foreground** gesture detection, not an always-on background listener. See [Apple's AssistiveTouch guide](https://support.apple.com/en-mide/guide/watch/apdec70bfd2d/watchos) and [activation instructions](https://support.apple.com/en-us/111111).
 
-After the ready haptic, brief dimming preserves the **remaining** armed time and calibrated wrist position. It never restarts the countdown. Gestures can continue if watchOS keeps delivering fresh motion samples. If delivery is interrupted, incomplete gestures are discarded and you must return to neutral before acting again. Late samples are never replayed as commands. Actually leaving Wizardry, navigating to Now Playing, stopping, changing settings, or sensor failure still disarms the watch. Without an explicit armed window, detection pauses while inactive even if Require Wake is disabled.
+After the ready haptic, brief dimming preserves the **remaining** armed time and calibrated wrist position. It never restarts the countdown. Gestures can continue if watchOS keeps delivering fresh motion samples. If delivery is interrupted, incomplete gestures are discarded and you must return to neutral before acting again. Late samples are never replayed as commands. Actually leaving Wizardry, navigating to Now Playing, stopping, changing settings, or sensor failure still disarms the watch. Without an explicit armed window, detection pauses while inactive regardless of legacy saved wake settings.
 
 This does not force the screen to stay awake or grant background runtime. On supported watches, **Settings → Gestures → Wrist Flick → Off** may prevent rolls from being interpreted as the system's dismissal gesture. See [Apple's Wrist Flick guide](https://support.apple.com/guide/watch/use-gestures-for-notifications-and-alerts-apd8bcbaa778/27/watchos/27).
 
@@ -114,3 +114,6 @@ On September 30, 2026, version **0.1.0 (2.1)** from `caaff0da6647cc1dff09f2667c3
 - [Apple: Double Tap](https://developer.apple.com/documentation/watchos-apps/enabling-double-tap)
 - [Spotify: iOS registration](https://developer.spotify.com/documentation/ios/getting-started)
 - [Spotify: development quota and Premium](https://developer.spotify.com/documentation/web-api/concepts/quota-modes)
+
+
+Live computer volume, learned single-touch setup, and physical acceptance checks are described in [LIVE_VOLUME.md](LIVE_VOLUME.md). Keep AssistiveTouch single finger touch assigned to **None**; double touch runs **Activate Wizardry**. The separate twist-to-wake mechanism has been removed.

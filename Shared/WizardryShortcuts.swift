@@ -21,7 +21,7 @@ struct StartWizardrySession: AppIntent {
 private enum WatchActivationError: LocalizedError {
     case runOnWatch
     var errorDescription: String? {
-        "Run this shortcut on your Apple Watch to activate Wizardry. Enable Show on Apple Watch in the shortcut's details, then assign it to an AssistiveTouch hand gesture."
+        "Run this shortcut on your Apple Watch to activate Wizardry. Enable Show on Apple Watch in the shortcut's details, then assign double finger touch to it in AssistiveTouch."
     }
 }
 
