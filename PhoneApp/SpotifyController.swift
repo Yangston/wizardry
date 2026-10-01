@@ -7,7 +7,7 @@ import UIKit
 @MainActor
 final class SpotifyController: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
     static let redirect = "wizardry-spotify://callback"
-    @Published var clientID = UserDefaults.standard.string(forKey:"spotifyClientID") ?? ""
+    @Published var clientID = UserDefaults.standard.string(forKey:"spotifyClientID") ?? (Bundle.main.object(forInfoDictionaryKey:"SpotifyClientID") as? String ?? "")
     @Published private(set) var status = "Connect Spotify Premium to control your active player"
     @Published private(set) var connected = false
     private var auth: ASWebAuthenticationSession?
@@ -36,7 +36,6 @@ final class SpotifyController: NSObject, ObservableObject, ASWebAuthenticationPr
     func login() {
         let id = clientID.trimmingCharacters(in:.whitespacesAndNewlines)
         guard id.count == 32, id.allSatisfy(\.isHexDigit) else { status = "Enter the public Client ID from your Spotify Developer app"; return }
-        UserDefaults.standard.set(id,forKey:"spotifyClientID")
         verifier = random(); state = random()
         let challenge = Data(SHA256.hash(data:Data(verifier.utf8))).base64EncodedString().replacingOccurrences(of:"+",with:"-").replacingOccurrences(of:"/",with:"_").replacingOccurrences(of:"=",with:"")
         var url = URLComponents(string:"https://accounts.spotify.com/authorize")!
@@ -52,6 +51,7 @@ final class SpotifyController: NSObject, ObservableObject, ASWebAuthenticationPr
                 }
                 do {
                     try await self.token(["grant_type":"authorization_code","code":code,"redirect_uri":Self.redirect,"client_id":id,"code_verifier":self.verifier])
+                    UserDefaults.standard.set(id,forKey:"spotifyClientID")
                     self.status = "Spotify connected · start playback in Spotify first"
                 } catch { self.status = error.localizedDescription }
                 self.verifier = ""; self.state = ""
@@ -80,7 +80,7 @@ final class SpotifyController: NSObject, ObservableObject, ASWebAuthenticationPr
         if expiresAt <= Date() {
             let refresh = PairingKeychain.load(account:"spotifyRefresh")
             guard !refresh.isEmpty else { throw MusicError.message("Connect Spotify in Setup first") }
-            try await token(["grant_type":"refresh_token","refresh_token":refresh,"client_id":clientID.trimmingCharacters(in:.whitespacesAndNewlines)])
+            try await token(["grant_type":"refresh_token","refresh_token":refresh,"client_id":UserDefaults.standard.string(forKey:"spotifyClientID") ?? clientID.trimmingCharacters(in:.whitespacesAndNewlines)])
         }
         var request = URLRequest(url:URL(string:"https://api.spotify.com/v1/me/player"+path)!)
         request.httpMethod = method; request.setValue("Bearer "+accessToken,forHTTPHeaderField:"Authorization")

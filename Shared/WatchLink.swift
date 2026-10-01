@@ -1,4 +1,4 @@
-﻿import Combine
+import Combine
 import Foundation
 import WatchConnectivity
 
@@ -24,7 +24,7 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
     func sync(_ configuration: WizardryConfiguration) {
         guard configuration.isValid, let data = try? JSONEncoder().encode(configuration),
               let session, session.activationState == .activated else { return }
-        do { try session.updateApplicationContext(["configuration":data]); status = "Settings sent to paired watch" }
+        do { try session.updateApplicationContext(["configuration":data]); status = "Settings queued · watch applies them when connected" }
         catch { status = "Settings sync failed: \(error.localizedDescription)" }
     }
     func requestStream() {

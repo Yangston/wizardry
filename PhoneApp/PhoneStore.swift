@@ -1,4 +1,4 @@
-﻿import AVFoundation
+import AVFoundation
 import Combine
 import Foundation
 import MediaPlayer
@@ -88,7 +88,7 @@ final class PhoneStore: ObservableObject {
             result = await spotify.perform(binding.action,deadline:deadline)
         } else {
             switch binding.action {
-            case .haptic: result = .init(outcome:.executed,message:"Haptic confirms gesture on watch")
+            case .haptic: result = .failure("Try this gesture on the watch to feel its haptic")
             case .phonePing: result = chime()
             case .phonePlayPause,.phoneNext,.phonePrevious:
                 guard MPMediaLibrary.authorizationStatus() == .authorized else {

@@ -1,44 +1,32 @@
-# Computer receiver
+﻿# Computer receiver
 
-Python 3.10+; standard library only. Supports dry-run testing anywhere and actual volume keys on Windows. The Pi can host a later device router; no lights integration is claimed here.
-
-## Start on Windows
-
-In PowerShell, from the repository root:
+Python 3.10+; no dependencies. Run on your Windows computer:
 
 ```powershell
-$env:WIZARDRY_TOKEN = python -c "import secrets; print(secrets.token_hex(12))"
-$env:WIZARDRY_TOKEN
-python receiver/server.py --host 0.0.0.0
+python receiver/server.py --host 0.0.0.0 --pair
 ```
 
-The token is shown only in your local terminal so you can enter it on the watch. Find your computer's **LAN IPv4 address** with `ipconfig`. If Windows Firewall prompts, permit access on your trusted **Private** network only. Do not expose this port on the internet.
+This starts a **dry-run** receiver and prints a fresh, session-only pairing token locally. In the iPhone Wizardry app, Setup → Computer receiver, enter `http://YOUR-PC-LAN-IP:8765` and that token, then Save pairing & test connection. Use your computer's LAN IPv4 address (`ipconfig`), not `0.0.0.0` or `localhost`. Both devices need to reach the same private LAN. Allow Python through Windows Firewall on the private network if prompted.
 
-On the watch, open **Computer control**:
-
-1. Set the server URL to `http://YOUR-PC-IP:8765` (not `localhost`, not `0.0.0.0`, and without `/command`).
-2. Enter the same token; use the paired iPhone keyboard prompt if available.
-3. Tap **Send test command**. Expect the terminal to report `ping`, and the watch to show `Received (dry run)`.
-4. Go back to the main screen, tap Start, then enable **Gestures control volume** in Computer control and return to the main screen. The toggle resets when the app becomes inactive.
-
-To actually change volume, stop the receiver with Ctrl+C and restart in the **same PowerShell window**, preserving the token:
+To actually execute media/presentation keys, stop the receiver and restart:
 
 ```powershell
-python receiver/server.py --host 0.0.0.0 --execute
+python receiver/server.py --host 0.0.0.0 --pair --execute
 ```
 
-Rotate + sends one volume-up key; Rotate − sends one volume-down key. The main screen's haptic confirms detection; the Computer screen confirms receipt/execution. Network requests time out and are not queued for later replay.
+Enter the newly generated token on the phone. For a stable token across restarts, set `WIZARDRY_TOKEN` to a private random value of at least 16 characters and omit `--pair`. Never commit or share tokens.
 
-## Networking and privacy
+| Command | Windows effect |
+|---|---|
+| `ping` | Acknowledgement only |
+| `volume_up`, `volume_down` | System media-volume key |
+| `mute` | Toggle mute |
+| `play_pause` | Media play/pause key |
+| `next_track`, `previous_track` | Media track key |
+| `next_slide`, `previous_slide` | Right/left arrow in the focused application |
 
-Both devices must reach the same LAN. watchOS may route requests through its paired iPhone or Wi-Fi; guest Wi-Fi isolation and VPNs can prevent LAN access. Verify on your own setup. Plain HTTP is for trusted-LAN prototyping and carries the token unencrypted. For HTTPS, use `--cert certificate.pem --key private-key.pem` and a hostname/certificate trusted by the watch; self-signed certificates are not silently accepted. The watch's HTTP exception should be removed when moving to an HTTPS-only product.
+There is no arbitrary command or shell execution. UUID replay prevention, token authentication, a 15-second receiver expiry, and rate limiting remain enforced. The phone accepts watch commands only within five seconds and does not queue or retry them. Phone “dry run” status means acknowledged, not executed.
 
-The server only accepts ping/volume commands, validates bearer tokens, rejects requests older/newer than 15 seconds, deduplicates IDs for 30 seconds, and rate-limits volume actions. It never executes arbitrary shell commands. Clocks must be synchronized. Token entry is session-only on the watch; restart requires entering it again.
+HTTP is for a trusted private LAN; optional `--cert certificate.pem --key private.key` serves HTTPS with a certificate trusted by the phone. Do not expose this listener to the internet. Pi/macOS/Linux can run dry-run mode; execution in this version is implemented for Windows.
 
-## Test
-
-```powershell
-python -m unittest discover -s receiver -v
-```
-
-Tests verify authentication, expiry, command allowlisting, deduplication, rate limiting, dry-run behavior, and a real HTTP request. Actual Windows audio changes require a logged-in desktop session and must be checked manually.
+Run tests: `python -m unittest discover -s receiver -v`.

@@ -6,6 +6,7 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
+    SPOTIFY_CLIENT_ID: ""
     WIZARDRY_BUNDLE_ID: com.yangston.wizardry
     CODE_SIGN_STYLE: Automatic
 targets:
@@ -66,6 +67,7 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSHomeKitUsageDescription: Wizardry controls the lights, plugs, and scenes you select with your watch gestures.
         NSAppleMusicUsageDescription: Wizardry sends your selected playback commands to Apple Music.
+        SpotifyClientID: $(SPOTIFY_CLIENT_ID)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         CFBundleURLTypes:

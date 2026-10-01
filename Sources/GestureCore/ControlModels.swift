@@ -30,11 +30,11 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .spotifyPlayPause: return "Spotify ? Play / pause"
-        case .spotifyNext: return "Spotify ? Next track"
-        case .spotifyPrevious: return "Spotify ? Previous track"
-        case .spotifyVolumeUp: return "Spotify Connect ? Volume up"
-        case .spotifyVolumeDown: return "Spotify Connect ? Volume down"
+        case .spotifyPlayPause: return "Spotify · Play / pause"
+        case .spotifyNext: return "Spotify · Next track"
+        case .spotifyPrevious: return "Spotify · Previous track"
+        case .spotifyVolumeUp: return "Spotify Connect · Volume up"
+        case .spotifyVolumeDown: return "Spotify Connect · Volume down"
         case .haptic: return "Watch · Haptic only"
         case .volumeUp: return "Computer · Volume up"
         case .volumeDown: return "Computer · Volume down"

@@ -274,12 +274,15 @@ struct SetupView: View {
                 }
                 Section("4 · Spotify") {
                     Text(spotify.status).font(.subheadline)
-                    TextField("Spotify Developer Client ID",text:$spotify.clientID).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button(spotify.connected ? "Reconnect Spotify" : "Connect Spotify") { spotify.login() }
                     if spotify.connected { Button("Disconnect Spotify",role:.destructive) { spotify.disconnect() } }
-                    Text("Spotify Premium and a developer app are required. Add the iOS bundle com.yangston.wizardry and redirect below to that app; allowlist your Spotify account. Only the public Client ID belongs here—never a client secret.").font(.caption)
-                    Text(SpotifyController.redirect).font(.caption.monospaced()).textSelection(.enabled)
-                    Link("Spotify developer setup",destination:URL(string:"https://developer.spotify.com/dashboard")!)
+                    if spotify.clientID.isEmpty { Text("Spotify developer setup is still needed for this beta. Expand Advanced to configure it.").font(.caption).foregroundStyle(.orange) }
+                    DisclosureGroup("Advanced connection settings") {
+                        TextField("Spotify Developer Client ID",text:$spotify.clientID).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Text("Spotify Premium and a developer app are required. Add the iOS bundle com.yangston.wizardry and redirect below; allowlist your account. Use only the public Client ID, never a client secret.").font(.caption)
+                        Text(SpotifyController.redirect).font(.caption.monospaced()).textSelection(.enabled)
+                        Link("Spotify developer setup",destination:URL(string:"https://developer.spotify.com/dashboard")!)
+                    }
                     Text("Start Spotify on the phone or Connect device you want to control. Commands target the active player. Phone profile uses Spotify for play/pause and tracks. Remote volume depends on the player's supported controls.").font(.caption)
                 }
                 Section("Phone volume") {

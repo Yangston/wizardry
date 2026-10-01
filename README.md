@@ -1,74 +1,69 @@
-# Wizardry
+﻿# Wizardry: Magic at a Wave
 
-An Apple Watch wrist-motion controller, developed from Windows with cloud macOS builds.
+A native iPhone and Apple Watch gesture remote, developed on Windows and built with Xcode in GitHub Actions.
 
-**First milestone:** open Wizardry on your watch, tap Start, rotate your wrist, and get one haptic confirmation. The app displays live motion, relative roll, actual sample frequency, the last gesture, and a gesture counter. A separate vibration button works without motion sensing.
+## Wave one · 0.2
 
-## Get it onto your watch
+- **iPhone companion:** set up your computer, connect Apple Home and Spotify, select a profile, and edit every gesture-to-action mapping.
+- **Watch:** a 30-minute control session, deliberate double-twist wake, an eight-second armed window, Double Tap on supported watches, Siri session launch, and native Now Playing controls.
+- **Live motion:** graphs and numeric values for acceleration, rotation rate, relative roll/pitch, yaw, and gravity. About 50 Hz capture, 10 Hz display, bounded local buffers, and explicit stale status.
+- **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page.
+- **Phone:** Spotify playback on the active player, Apple Music controls, a locator chime, native volume slider, and named Shortcuts.
+- **Apple Home:** select existing lights, switches, Matter plugs, or scenes. No separate Matter commissioning is required.
 
-Follow **[the Windows-to-TestFlight setup guide](docs/SETUP.md)**. The unsigned **Build and test** workflow requires no Apple credentials. The manual **Upload to TestFlight** workflow requires your paid Apple Developer account and signing configuration.
+## Install and set up
 
-The project targets **watchOS 10+**. A non-launchable iOS 17+ distribution container packages the watch-only app for TestFlight; this is not an iPhone companion app. An iPhone paired to the watch is used to install the TestFlight build. Check your watch and phone versions before enrolling.
+Install the latest Wizardry beta using TestFlight on the iPhone paired with your Watch. Version 0.2 adds a real iPhone app to the existing watch app. Open Wizardry on both devices; Apple's existing pairing links them automatically.
 
-## What is included
+In **Setup** on iPhone:
 
-- SwiftUI watch app with Core Motion sampling requested at 50 Hz; UI refreshes at 10 Hz.
-- Relative-roll detector with sustained threshold, cooldown, and neutral-pose rearming.
-- Haptic feedback, live diagnostics, and explicit Start/Stop.
-- Optional LAN commands with acknowledgement and no delayed retries.
-- Python receiver with dry-run mode; optional Windows volume control.
-- XcodeGen project, simulator build, unsigned distribution archive validation, and a manual signing/upload workflow.
-- Gesture-state-machine tests and receiver tests, including an actual HTTP round trip.
+1. Sync settings to the watch.
+2. Pair the optional [computer receiver](receiver/README.md) using its LAN address and token.
+3. Connect Apple Home, then choose your devices and scenes in **Motions**.
+4. Connect Spotify Premium. A Spotify developer client must be configured; the app uses PKCE without a client secret. Start Spotify on your intended playback device first.
+5. Select **Computer**, **Phone**, or **Home** on Control. Editing a profile does not activate it.
 
-## Try it
+See [release and account setup](docs/SETUP.md) and [the first-wave device checklist](docs/WAVE_ONE.md).
 
-1. Open Wizardry and hold your wrist comfortably still.
-2. Tap **Start**. The first sensor sample establishes the starting pose.
-3. Rotate until the displayed roll exceeds about **37°** in either direction for at least **0.12 seconds**.
-4. Expect a haptic click and one counter increment.
-5. Return within about **9°** of the initial pose for **0.25 seconds**, after the **1-second** cooldown, before repeating.
-6. Tap Stop/Start to recalibrate at a different pose.
+## Raise · Wake · Act
 
-The +/− directions are sensor-relative; left/right wrist and watch orientation affect which movement increases roll. They are intentionally not labelled clockwise/counterclockwise. This is a threshold prototype, not a trained gesture model.
+Start a session on the Watch. Hold still for calibration. With Wizardry frontmost, twist **+ / − / + / −** (or the reverse) within **2.5 seconds**. A double haptic arms the watch. Return to neutral briefly, then make the action gesture within the armed window. Return to neutral between actions.
 
-## Runtime limits
+| Motion | Computer default | Phone default | Home default |
+|---|---|---|---|
+| Twist + | Volume up | Volume Up Shortcut | Selected light/plug on |
+| Twist − | Volume down | Volume Down Shortcut | Selected light/plug off |
+| Tilt up | Next track | Spotify next track | Selected Home scene |
+| Tilt down | Previous track | Spotify previous track | iPhone locator chime |
+| Double shake | Play/pause | Spotify play/pause | Toggle selected light/plug |
 
-Capture stops when the app is no longer active, including wrist-down/inactive transitions. It never silently restarts. This version does not provide all-day or background gesture listening and does not misuse workout sessions to stay alive. A haptic confirms **local detection**; the Computer screen separately reports whether a network command succeeded.
+Home targets start unassigned: choose them before testing. Gesture directions depend on wrist/orientation; use Live to inspect them. These are tunable motion heuristics, not a trained gesture model.
 
-## Optional computer control
+## Runtime and platform limits
 
-See **[receiver instructions](receiver/README.md)**. First test a ping in dry-run mode. Then enable Windows volume execution and the watch's “Gestures control volume” toggle. Pi/Linux can run the dry-run receiver; actual device/light integrations are future work.
+**This is not always-on background recognition.** watchOS suspends ordinary apps. Sensors pause and actions disarm on wrist-down/inactive/background transitions. During an active 30-minute session, returning to Wizardry resumes calibration; wake/arm is required again unless explicitly disabled. Set Watch **Settings → General → Return to Clock → After 1 hour** for a reading session. If the clock or another app is showing, reopen Wizardry; Siri's “Start Wizardry” app shortcut can open a session. Double Tap activates Arm while Wizardry is visible on supported watches. No fake workouts or continuous silent audio are used.
 
-Plain HTTP is enabled for this LAN prototype through an App Transport Security exception. Pairing tokens are session-only on the watch. Use a trusted private network, or configure HTTPS with a certificate trusted by the watch. There is no cloud dependency for gesture processing or device commands; GitHub and Apple are used for building and installation.
+**Spotify:** Premium and developer authorization are required. Controls target the current active Spotify player; start playback there first. Remote volume only works when that player advertises support. Spotify iPhone volume may be unavailable through its API.
 
-## Repository map
+**iPhone volume:** use the native slider or Watch Now Playing's Digital Crown. Gesture volume uses user-created Shortcuts while Wizardry is foreground on iPhone. Create `Wizardry Volume Up` / `Wizardry Volume Down` using Get Device Details → Current Volume, Calculate ±0.06, then Set Volume. Launching a Shortcut opens Shortcuts and cannot report completion. These are not silent locked-phone volume controls.
 
-| Path | Purpose |
-|---|---|
-| `WatchApp/` | Watch interface, sensors, and command client |
-| `Sources/GestureCore/` | Platform-independent rotation detector |
-| `Tests/GestureCoreTests/` | Detector regression tests |
-| `project.yml` | Source of truth for the generated Xcode project |
-| `.github/workflows/build.yml` | Unsigned builds, archive validation, tests |
-| `.github/workflows/testflight.yml` | Manual signed upload |
-| `receiver/` | Local computer receiver and tests |
-| `docs/SETUP.md` | Account setup and installation |
+**Home:** access must be granted on the phone; accessory reachability depends on the Home network and hub. Only light/outlet/switch power characteristics are enumerated. Home scenes are explicitly selected by the user.
 
-## Development
+A recognition haptic confirms a gesture, not successful execution. The watch and phone display target acknowledgements, dry runs, handoffs, and errors separately. Commands expire after five seconds and are never queued for later execution or automatically retried.
 
-On Windows: edit with VS Code/Codex, run `python -m unittest discover -s receiver -v`, commit, and push. If Swift is installed locally, run `swift test` for the detector. Apple framework compilation happens in Actions.
+## Privacy and pairing
 
-On a Mac: install Xcode and XcodeGen, run `xcodegen generate`, then open `Wizardry.xcodeproj`. The `Wizardry` scheme runs the watch app; `WizardryDistribution` archives its container. Generated projects and signing assets are excluded from Git.
+Motion processing happens on the Watch; live samples are sent only to the paired iPhone while its Live screen requests them. Graphs retain at most 240 samples in memory. No motion samples are uploaded to Spotify or a server. Spotify requests contain only the authorization and player-control information its service requires. Receiver tokens and Spotify refresh tokens stay in the iPhone Keychain. The watch receives gesture mappings, not credentials.
 
-## Verification checklist on hardware
+Computer HTTP is intended for a trusted private LAN. HTTPS with a trusted certificate is supported. Receiver commands use an explicit allowlist, token authentication, replay checks, expiry, and rate limiting. Presentation keys affect the currently focused computer application.
 
-- [ ] Test vibration works.
-- [ ] Start shows changing acceleration/rotation and a plausible actual sampling rate.
-- [ ] Each deliberate rotation fires once; a held pose does not repeat.
-- [ ] Returning to neutral rearms; small movements and brief spikes do not trigger.
-- [ ] Stop, wrist-down, and app switching stop capture.
-- [ ] Test command reaches the receiver; dry-run status is distinguished from executed status.
-- [ ] Enable execution and verify the direction of one volume step.
-- [ ] Turn off the receiver and confirm an error, with no queued command firing later.
+## Development and validation
 
-Cloud build success cannot establish physical gesture accuracy, haptic behavior, battery use, or LAN routing; those require your watch.
+- `python -m unittest discover -s receiver -v`
+- `python -m unittest discover -s scripts/tests -v`
+- `swift test` on a system with Swift, or GitHub Actions.
+- `project.yml` is the XcodeGen source. `Wizardry` builds the Watch; `WizardryPhone` builds/tests the companion; `WizardryDistribution` archives both.
+- CI tests gesture/wake state, command gating, receiver HTTP, both native targets, archive metadata, and iPhone UI navigation with screenshot artifacts.
+- Signed distribution remains manual, main-only, and gated by successful CI on the exact commit.
+
+Simulator and CI success cannot verify real gestures, paired-device background delivery, Home accessories, Spotify authorization, battery use, or installation. Record those on hardware in the device checklist.
