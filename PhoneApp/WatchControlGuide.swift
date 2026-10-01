@@ -1,4 +1,75 @@
 import SwiftUI
+import Charts
+
+struct MotionFeedbackCard: View {
+    @ObservedObject var store: PhoneStore
+    var body: some View {
+        TimelineView(.periodic(from:.now,by:0.25)) { context in
+            let frame = store.frames.last
+            let snapshot = frame?.control
+            let feedback = snapshot?.volumeMotion
+            let fresh = frame.map {let age = context.date.timeIntervalSince1970-$0.time; return age >= -0.1 && age < 2 && context.date.timeIntervalSince(store.lastTelemetry) < 2} ?? false
+            VStack(alignment:.leading,spacing:12) {
+                HStack {
+                    Label("Movement & volume",systemImage:"hand.raised").font(.headline)
+                    Spacer()
+                    Text(fresh ? "Live" : "Waiting").font(.caption).foregroundStyle(fresh ? .green : .secondary)
+                }
+                MotionAxisMeter(title:"Twist",degrees:(frame?.roll ?? 0)*180 / .pi)
+                MotionAxisMeter(title:"Tilt",degrees:(frame?.pitch ?? 0)*180 / .pi,tint:.cyan)
+                MotionAxisMeter(title:"Yaw",degrees:(snapshot?.relativeYaw ?? 0)*180 / .pi,tint:.orange)
+                Text("Angles from the ready pose · extend yaw to ±90°").font(.caption2).foregroundStyle(.secondary)
+                HStack {
+                    Label(fresh && snapshot?.phase == .adjustingVolume ? movement(feedback?.velocity ?? 0) : "Raise ↑ / lower ↓",
+                          systemImage:"arrow.up.arrow.down").font(.subheadline.bold())
+                    Spacer()
+                    if let target = snapshot?.requestedVolume {
+                        Text(String(format:"%.1f%%",target*100)).font(.title2.monospacedDigit())
+                            .accessibilityIdentifier("live-volume-value")
+                    }
+                }
+                if let target = snapshot?.requestedVolume { ProgressView(value:target).tint(.green) }
+                if let feedback {
+                    Text(String(format:"Started %.0f%% · change %+.1f percentage points",
+                                feedback.startingVolume*100,((snapshot?.requestedVolume ?? feedback.startingVolume)-feedback.startingVolume)*100))
+                        .font(.caption).monospacedDigit()
+                    Text(String(format:"Estimated control travel %+.1f cm · speed %+.1f cm/s",feedback.travel*100,feedback.velocity*100))
+                        .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Chart {
+                    ForEach(store.frames) { sample in
+                        if let value = sample.control?.requestedVolume {
+                            LineMark(x:.value("Time",Date(timeIntervalSince1970:sample.time)),y:.value("Volume",value*100))
+                                .foregroundStyle(by:.value("Volume","Requested"))
+                        }
+                        if let value = sample.control?.acknowledgedVolume {
+                            LineMark(x:.value("Time",Date(timeIntervalSince1970:sample.time)),y:.value("Volume",value*100))
+                                .foregroundStyle(by:.value("Volume","Acknowledged"))
+                        }
+                    }
+                    if let feedback {
+                        RuleMark(y:.value("Started",feedback.startingVolume*100)).foregroundStyle(.gray)
+                            .lineStyle(StrokeStyle(lineWidth:1,dash:[4,4]))
+                    }
+                }.chartYScale(domain:0...100).chartXAxis(.hidden)
+                    .chartForegroundStyleScale(["Requested":Color.green,"Acknowledged":Color.cyan]).frame(height:110)
+                    .overlay {
+                        if !store.frames.contains(where:{$0.control?.requestedVolume != nil}) {
+                            Text("Extend after the ready haptic to start volume").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                if snapshot?.dryRun == true { Text("Dry run · computer audio is unchanged").font(.caption).foregroundStyle(.orange) }
+                if !fresh {
+                    Text(frame == nil ? "Activate Wizardry on the Watch to see your movements here." : "Showing last received movement, not live readings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(18).background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:20))
+        }
+    }
+    private func movement(_ velocity: Double) -> String {
+        velocity > 0.01 ? "Raising ↑ · volume up" : velocity < -0.01 ? "Lowering ↓ · volume down" : "Holding volume"
+    }
+}
 
 struct WatchControlCard: View {
     @ObservedObject var store: PhoneStore

@@ -9,11 +9,20 @@ struct ContentView: View {
         NavigationStack(path:$motion.navigationPath) {
             ScrollView {
                 VStack(spacing:12) {
-                    Image(systemName:motion.armed ? "sparkles" : "wand.and.stars")
-                        .font(.title).foregroundStyle(motion.armed ? .green : .purple)
-                    Text(motion.configuration.selectedProfile.name).font(.headline)
+                    HStack {
+                        Image(systemName:motion.armed ? "sparkles" : "wand.and.stars")
+                            .font(.title3).foregroundStyle(motion.armed ? .green : .purple)
+                        Text(motion.configuration.selectedProfile.name).font(.headline)
+                    }
                     Text(motion.status).font(.caption).multilineTextAlignment(.center)
-                    VolumeStatusView(remote:motion.volume,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
+                    VStack(spacing:5) {
+                        MotionAxisMeter(title:"Twist",degrees:motion.rollDegrees)
+                        MotionAxisMeter(title:"Tilt",degrees:motion.pitchDegrees,tint:.cyan)
+                        MotionAxisMeter(title:"Yaw",degrees:motion.yawDegrees,tint:.orange)
+                        Text(motion.running ? "From ready pose · raise ↑ / lower ↓" : "Activate to see live movement")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    VolumeStatusView(remote:motion.volume,feedback:motion.volumeMotion,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
                     if #available(watchOS 11.0, *) {
                         armButton.handGestureShortcut(.primaryAction)
                     } else { armButton }
@@ -81,15 +90,26 @@ struct ContentView: View {
 
 private struct VolumeStatusView: View {
     @ObservedObject var remote: LiveVolumeRemote
+    let feedback: VolumeMotionFeedback?
     let tapStatus: String
     let lock: () -> Void
     var body: some View {
         if remote.state != .idle {
             VStack(spacing:5) {
                 Text(remote.message).font(.caption).multilineTextAlignment(.center)
-                if let target = remote.requested { Text("Requested \(Int((target*100).rounded()))%").font(.headline) }
+                if let target = remote.requested {
+                    Text(String(format:"Requested %.1f%%",target*100)).font(.headline.monospacedDigit())
+                    ProgressView(value:target).tint(.green)
+                }
                 if let actual = remote.acknowledged {
                     Text("\(remote.dryRun ? "Dry run" : "Acknowledged") \(Int((actual*100).rounded()))%").font(.caption2)
+                }
+                if let feedback {
+                    Text(String(format:"Started %.0f%% · change %+.1f",feedback.startingVolume*100,
+                                ((remote.requested ?? feedback.startingVolume)-feedback.startingVolume)*100))
+                        .font(.caption2.monospacedDigit())
+                    Label(feedback.velocity > 0.01 ? "Raising ↑" : feedback.velocity < -0.01 ? "Lowering ↓" : "Holding",
+                          systemImage:"hand.raised").font(.caption2)
                 }
                 if remote.state == .adjusting {
                     Text(tapStatus).font(.caption2)

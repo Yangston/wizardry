@@ -86,6 +86,24 @@ class LiveVolumeTests(unittest.TestCase):
         self.assertEqual(self.processor.handle(self.request("update", 1, 0.6))[0], 409)
         self.assertEqual(self.processor.handle(self.request("update", 3, 0.6))[0], 200)
 
+    def test_twenty_hz_gradual_updates_start_at_live_volume_without_reset(self):
+        self.audio.value = 0.73
+        status, reply = self.processor.handle(self.request())
+        self.assertEqual(status, 200)
+        self.assertEqual(reply["volume"], 0.73)
+        self.assertEqual(self.audio.sets, [])
+        targets = [0.73 + step*0.001 for step in range(1, 21)]
+        for sequence, target in enumerate(targets, 1):
+            self.now += 0.05
+            self.assertEqual(self.processor.handle(self.request("update", sequence, target))[0], 200)
+        self.assertEqual(self.audio.sets, targets)
+        self.now += 0.02
+        self.assertEqual(self.processor.handle(self.request("update", 21, 0.8))[0], 429)
+        self.assertEqual(self.audio.value, targets[-1])
+        # Final lock must not wait for the update throttle.
+        self.assertEqual(self.processor.handle(self.request("end", 22, targets[-1]))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 23, 0.8))[0], 409)
+
     def test_idle_expiry_device_change_and_new_session_invalidate_old(self):
         self.processor.handle(self.request())
         self.now += 6.1

@@ -142,6 +142,18 @@ struct MotionFrame: Codable, Identifiable {
     var control: WatchControlSnapshot? = nil
 }
 
+/// Short-stroke estimate signed in the configured volume direction; not an
+/// absolute hand position. Optional on telemetry from older Watch versions.
+struct VolumeMotionFeedback: Codable, Equatable {
+    var startingVolume: Double
+    var travel: Double
+    var velocity: Double
+    var acceleration: Double
+    var isValid: Bool {
+        [startingVolume,travel,velocity,acceleration].allSatisfy(\.isFinite) && (0...1).contains(startingVolume)
+    }
+}
+
 struct WatchControlSnapshot: Codable, Equatable {
     enum Phase: String, Codable {
         case unarmed, calibrating, armed, extending, volumeStarting, adjustingVolume, lockingVolume, locked, stopped, failed, enrolling
@@ -171,11 +183,12 @@ struct WatchControlSnapshot: Codable, Equatable {
     var singleTapStatus: String
     var armRemaining: Int
     var enrollmentRemaining: Int?
+    var volumeMotion: VolumeMotionFeedback? = nil
     var isValid: Bool {
         [requestedVolume,acknowledgedVolume].allSatisfy {$0.map {$0.isFinite && (0...1).contains($0)} ?? true} &&
         (relativeYaw.map {$0.isFinite && abs($0) <= .pi+0.001} ?? true) &&
         (0...20).contains(armRemaining) && (enrollmentRemaining.map {(0...300).contains($0)} ?? true) &&
-        singleTapStatus.count <= 500 && profileID.count <= 128
+        singleTapStatus.count <= 500 && profileID.count <= 128 && (volumeMotion?.isValid ?? true)
     }
 }
 

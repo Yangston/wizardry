@@ -6,7 +6,7 @@ A native iPhone and Apple Watch gesture remote, developed on Windows and built w
 
 - **iPhone companion:** set up your computer, connect Apple Home and Spotify, select a profile, and edit every gesture-to-action mapping.
 - **Watch:** touch-free AssistiveTouch/Shortcut launch with hold-still calibration and automatic arming, a 30-minute control session, explicit shortcut/button arming, experimental live computer volume and learned single-touch locking, an eight-second armed window, Double Tap on supported watches, and native Now Playing controls.
-- **Live motion:** graphs and numeric values for acceleration, rotation rate, relative roll/pitch, yaw, and gravity. Requested 100 Hz capture (actual hardware rate displayed), 10 Hz display, bounded local buffers, and explicit stale status.
+- **Live motion:** opening screens show twist, tilt, yaw and volume feedback. iPhone Control / Live include a requested-versus-acknowledged volume graph and all sensor axes. Requested 100 Hz capture (actual hardware rate displayed), up to 20 Hz display, roughly 100 ms telemetry batches, bounded local buffers, and explicit stale status.
 - **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page.
 - **Phone:** Spotify playback on the active player, Apple Music controls, a locator chime, native volume slider, and named Shortcuts.
 - **Apple Home:** select existing lights, switches, Matter plugs, or scenes. No separate Matter commissioning is required.
@@ -31,7 +31,7 @@ See [release and account setup](docs/SETUP.md) and [the first-wave device checkl
 
 **Manual entry:** tap **Arm**, hold still while looking at the watch, and wait for the ready haptic. There is no separate twist-to-wake sequence.
 
-**Live computer volume (experimental):** with the Computer profile selected, extend your arm until z / yaw changes about 90 degrees from the pose at the ready haptic. After the entry haptic, raise/lower your hand in short strokes with pauses. Volume follows estimated vertical displacement, starting at the actual Windows volume. A personalized single finger touch or the **Lock volume** button stops adjustment; five seconds without movement also ends it. Keep AssistiveTouch single touch at **None**. Requested and acknowledged volume are shown separately. See [enrollment, protocol, and pending hardware validation](docs/LIVE_VOLUME.md).
+**Live computer volume (experimental):** with the Computer profile selected, extend your arm until z / yaw changes about 90 degrees from the pose at the ready haptic. After the entry haptic, raise/lower your hand in short strokes with pauses. The direction is flipped from the previous build to match the user's observed setup: raise increases volume, lower decreases it. Volume changes incrementally from the actual Windows volume, with up to 20 acknowledged updates per second (paired/network latency lowers the delivered rate). A personalized single finger touch or the **Lock volume** button stops adjustment; five seconds without movement also ends it. Keep AssistiveTouch single touch at **None**. Requested and acknowledged volume are shown separately. Update both apps and restart the updated receiver together. See [enrollment, protocol, and pending hardware validation](docs/LIVE_VOLUME.md).
 
 | Motion | Computer default | Phone default | Home default |
 |---|---|---|---|
@@ -61,7 +61,7 @@ A recognition haptic confirms a gesture, not successful execution. The watch and
 
 ## Privacy and pairing
 
-Motion processing happens on the Watch; live samples are sent only to the paired iPhone while its Live screen requests them. Graphs retain at most 240 samples in memory. No motion samples are uploaded to Spotify or a server. Spotify requests contain only the authorization and player-control information its service requires. Receiver tokens and Spotify refresh tokens stay in the iPhone Keychain. The watch receives gesture mappings, not credentials.
+Motion processing happens on the Watch; live samples are sent only to the paired iPhone while its Control or Live screen requests them. Graphs retain at most 240 samples in memory. No motion samples are uploaded to Spotify or a server. Spotify requests contain only the authorization and player-control information its service requires. Receiver tokens and Spotify refresh tokens stay in the iPhone Keychain. The watch receives gesture mappings, not credentials.
 
 Computer HTTP is intended for a trusted private LAN. HTTPS with a trusted certificate is supported. Receiver commands use an explicit allowlist, token authentication, replay checks, expiry, and rate limiting. Presentation keys affect the currently focused computer application.
 

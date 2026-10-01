@@ -52,8 +52,8 @@ class LiveVolumeProcessor:
         if operation != "begin":
             if not self.active or self.active["id"] != session_id or self.active["revision"] != revision or sequence <= self.active["sequence"]:
                 return 409, {"error": "Unknown session or older sequence"}
-            if operation == "update" and now-self.active["update"] < 0.199:
-                return 429, {"error": "Maximum five volume updates per second"}
+            if operation == "update" and now-self.active["update"] < 0.049:
+                return 429, {"error": "Maximum twenty volume updates per second"}
         elif self.active and self.active["id"] == session_id:
             return 409, {"error": "Session already begun"}
         self.seen[event_id] = now

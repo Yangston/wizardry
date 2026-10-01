@@ -70,6 +70,9 @@ struct ExtensionArbiter {
 /// position reference. Pauses reset velocity without moving the volume anchor.
 struct VerticalVolumeTracker {
     private(set) var target = 0.0
+    private(set) var startingVolume = 0.0
+    private(set) var controlTravel = 0.0
+    private(set) var controlAcceleration = 0.0
     private(set) var velocity = 0.0
     private var lastTime: Double?
     private var stillSince: Double?
@@ -78,7 +81,7 @@ struct VerticalVolumeTracker {
     private var pendingDistance = 0.0
     private(set) var lastMovement = 0.0
     mutating func begin(volume: Double, acceleration: MotionVector, gravity: MotionVector, time: Double) {
-        self = Self(); target = min(1,max(0,volume)); lastTime = time; lastMovement = time
+        self = Self(); target = min(1,max(0,volume)); startingVolume = target; lastTime = time; lastMovement = time
         bias = Self.vertical(acceleration,gravity)
     }
     static func vertical(_ acceleration: MotionVector, _ gravity: MotionVector) -> Double {
@@ -86,7 +89,7 @@ struct VerticalVolumeTracker {
         return -acceleration.dot(gravity)/gravity.length * 9.80665
     }
     mutating func freeze(at time: Double) {
-        lastTime = time; velocity = 0; filtered = 0; pendingDistance = 0; stillSince = nil
+        lastTime = time; velocity = 0; filtered = 0; controlAcceleration = 0; pendingDistance = 0; stillSince = nil
     }
     mutating func update(acceleration: MotionVector, gravity: MotionVector, rotation: Double, time: Double, frozen: Bool = false) -> Double {
         guard acceleration.isFinite, gravity.isFinite, gravity.length > 0.5,
@@ -98,22 +101,30 @@ struct VerticalVolumeTracker {
         if apparentRest {
             if stillSince == nil { stillSince = time }
             if time-(stillSince ?? time) >= 0.3 {
-                velocity = 0; filtered = 0; pendingDistance = 0
+                velocity = 0; filtered = 0; controlAcceleration = 0; pendingDistance = 0
                 bias += 0.02*(Self.vertical(acceleration,gravity)-bias)
                 return target
             }
         } else { stillSince = nil; lastMovement = time }
         let raw = Self.vertical(acceleration,gravity)-bias
+        controlAcceleration = -raw
         filtered += dt/(0.02+dt)*(raw-filtered)
         let value = abs(filtered) < 0.12 ? 0 : filtered
         let oldVelocity = velocity
         velocity = min(1.5,max(-1.5,velocity+value*dt))
         pendingDistance += (oldVelocity+velocity)*0.5*dt
-        // 1 metre = 100 percentage points. Ignore sub-2 mm estimated motion.
-        if abs(pendingDistance) >= 0.002 {
-            target = min(1,max(0,target+pendingDistance)); pendingDistance = 0
+        // Flip the previous mapping to match the user's observed raise/lower
+        // direction. Travel is signed in the volume-control direction, not a
+        // measured absolute world height. 1 metre = 100 percentage points.
+        if abs(pendingDistance) >= 0.001 {
+            let change = -pendingDistance
+            controlTravel += change
+            target = min(1,max(0,target+change)); pendingDistance = 0
         }
         return target
+    }
+    var feedback: VolumeMotionFeedback {
+        .init(startingVolume:startingVolume,travel:controlTravel,velocity:-velocity,acceleration:controlAcceleration)
     }
 }
 

@@ -73,16 +73,57 @@ final class VolumeInteractionTests: XCTestCase {
         var tracker = VerticalVolumeTracker()
         tracker.begin(volume:0.5,acceleration:zero,gravity:gravity,time:0)
         for i in 1...20 { _ = tracker.update(acceleration:.init(x:0,y:0,z:0.1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertGreaterThan(tracker.target,0.5)
+        XCTAssertLessThan(tracker.target,0.5) // opposite of the previous mapping
         for i in 21...100 { _ = tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)*0.01) }
         XCTAssertEqual(tracker.velocity,0)
         let held = tracker.target
         for i in 101...600 { _ = tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)*0.01) }
         XCTAssertEqual(tracker.target,held)
         for i in 601...620 { _ = tracker.update(acceleration:.init(x:0,y:0,z:-0.1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertLessThan(tracker.target,held)
+        XCTAssertGreaterThan(tracker.target,held)
         for i in 621...900 { _ = tracker.update(acceleration:.init(x:0,y:0,z:-1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
+        XCTAssertEqual(tracker.target,1)
+        tracker.begin(volume:0.12,acceleration:zero,gravity:gravity,time:10)
+        for i in 1...300 { _ = tracker.update(acceleration:.init(x:0,y:0,z:1),gravity:gravity,rotation:0,time:10+Double(i)*0.01) }
         XCTAssertEqual(tracker.target,0)
+    }
+    func testFlippedStrokesAnchorToCurrentVolumeAndChangeGraduallyAtDeliveredRates() {
+        for rate in [50.0,100.0] {
+            for initial in [0.12,0.37,0.83] {
+                for direction in [-1.0,1.0] {
+                    var tracker = VerticalVolumeTracker()
+                    tracker.begin(volume:initial,acceleration:zero,gravity:gravity,time:0)
+                    XCTAssertEqual(tracker.target,initial)
+                    XCTAssertEqual(tracker.feedback.startingVolume,initial)
+                    XCTAssertEqual(tracker.feedback.travel,0)
+                    var previous = initial
+                    for i in 1...Int(rate*0.2) {
+                        let value = tracker.update(acceleration:.init(x:0,y:0,z:direction*0.1),gravity:gravity,
+                                                   rotation:0,time:Double(i)/rate)
+                        // A stroke changes the current level incrementally; it
+                        // never jumps to an absolute height-derived percentage.
+                        XCTAssertLessThan(abs(value-previous),0.01)
+                        if direction < 0 { XCTAssertGreaterThanOrEqual(value,previous) }
+                        else { XCTAssertLessThanOrEqual(value,previous) }
+                        previous = value
+                    }
+                    if direction < 0 {
+                        XCTAssertGreaterThan(tracker.target,initial)
+                        XCTAssertGreaterThan(tracker.feedback.travel,0)
+                        XCTAssertGreaterThan(tracker.feedback.velocity,0)
+                    } else {
+                        XCTAssertLessThan(tracker.target,initial)
+                        XCTAssertLessThan(tracker.feedback.travel,0)
+                        XCTAssertLessThan(tracker.feedback.velocity,0)
+                    }
+                    let held = tracker.target, travel = tracker.feedback.travel
+                    tracker.freeze(at:0.3)
+                    XCTAssertEqual(tracker.target,held)
+                    XCTAssertEqual(tracker.feedback.travel,travel)
+                    XCTAssertEqual(tracker.feedback.velocity,0)
+                }
+            }
+        }
     }
     func testTapFreezeAndDeliveryGapNeverIntegrateImpulse() {
         var tracker = VerticalVolumeTracker()

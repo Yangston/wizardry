@@ -56,7 +56,16 @@ struct ControlDashboard: View {
                     Picker("Control profile",selection:$store.configuration.selectedProfileID) {
                         ForEach(store.configuration.profiles) { Text($0.name).tag($0.id) }
                     }.pickerStyle(.segmented).onChange(of:store.configuration.selectedProfileID) { _,_ in store.saveConfiguration() }
+                    MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
+                    DisclosureGroup("All motion axes") {
+                        VStack(spacing:16) {
+                            SensorChart(title:"User acceleration",unit:"g",frames:store.frames,keys:[\.ax,\.ay,\.az])
+                            SensorChart(title:"Rotation rate",unit:"rad/s",frames:store.frames,keys:[\.rx,\.ry,\.rz])
+                            SensorChart(title:"Roll / pitch relative · yaw raw",unit:"degrees",frames:store.frames,keys:[\.roll,\.pitch,\.yaw],scale:180 / .pi)
+                            SensorChart(title:"Gravity",unit:"g",frames:store.frames,keys:[\.gx,\.gy,\.gz])
+                        }.padding(.top,12)
+                    }
                     VolumeFlowGuide(computer:store.configuration.selectedProfileID == "computer")
                     NavigationLink { FingerTapSetupGuide() } label: { Label("Single finger tap setup",systemImage:"hand.pinch") }
                     Text("Test discrete actions").font(.title2.bold())
@@ -203,12 +212,13 @@ struct LiveMotionView: View {
                         VStack(alignment:.leading,spacing:6) {
                             Label(live ? "Live from Apple Watch" : "Waiting for live motion",systemImage:live ? "dot.radiowaves.left.and.right" : "pause.circle")
                                 .foregroundStyle(live ? .green : .orange).font(.headline)
-                            Text(live ? "\(Int(store.frames.last?.hz ?? 0)) Hz capture · 10 Hz display · local transfer" : "Activate Wizardry on the Watch and hold still for the ready haptic. Keep Control or Live open on your phone.")
+                            Text(live ? "\(Int(store.frames.last?.hz ?? 0)) Hz capture · up to 20 Hz display · local transfer" : "Activate Wizardry on the Watch and hold still for the ready haptic. Keep Control or Live open on your phone.")
                                 .font(.caption).foregroundStyle(.secondary)
                             if !live && !store.frames.isEmpty { Text("Graphs show the last received data, not current readings.").font(.caption).foregroundStyle(.orange) }
                             if let sample = store.frames.last { Text("Watch: \(sample.state)").font(.caption) }
                         }
                     }
+                    MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
                     SensorChart(title:"User acceleration",unit:"g",frames:store.frames,keys:[\.ax,\.ay,\.az])
                     SensorChart(title:"Rotation rate",unit:"rad/s",frames:store.frames,keys:[\.rx,\.ry,\.rz])

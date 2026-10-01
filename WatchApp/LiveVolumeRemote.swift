@@ -19,6 +19,8 @@ final class LiveVolumeRemote: ObservableObject {
     private var sequence = 0
     private var inFlight: UUID?
     private var lastSend = -Double.infinity
+    private var lastDisplay = -Double.infinity
+    private var latestTarget: Double?
     private var sentTarget: Double?
     private var closing = false
     private var lockRequested = false
@@ -29,7 +31,8 @@ final class LiveVolumeRemote: ObservableObject {
     func begin(revision: String) {
         guard !ownsMotion else { return }
         sessionID = UUID(); self.revision = revision; sequence = 0
-        requested = nil; acknowledged = nil; sentTarget = nil; closing = false; dryRun = false
+        requested = nil; acknowledged = nil; latestTarget = nil; sentTarget = nil; closing = false; dryRun = false
+        lastDisplay = -.infinity
         state = .beginning; message = "Reading computer volume…"
         transmit(.begin)
         // An unreachable paired phone can fail synchronously in sendVolume.
@@ -37,35 +40,42 @@ final class LiveVolumeRemote: ObservableObject {
         loop?.cancel()
         loop = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for:.milliseconds(50)) } catch { return }
+                do { try await Task.sleep(for:.milliseconds(20)) } catch { return }
                 self?.pump()
             }
         }
     }
     func setTarget(_ value: Double) {
         guard state == .adjusting, value.isFinite else { return }
-        requested = min(1,max(0,value)); pump()
+        // Keep every sensor result for transport coalescing, but avoid making
+        // SwiftUI redraw at the full 100 Hz capture rate.
+        latestTarget = min(1,max(0,value)); pump()
     }
     func finish(lock: Bool) {
         guard state == .beginning || state == .adjusting else { return }
+        requested = latestTarget
         closing = true; lockRequested = lock; state = .locking
         message = lock ? "Locking…" : "Stopping…"
         pump()
     }
     private func pump() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if now-lastDisplay >= 0.05, let latestTarget, requested != latestTarget {
+            requested = latestTarget; lastDisplay = now
+        }
         guard inFlight == nil, sessionID != nil else { return }
-        if closing, requested != nil { transmit(.end); return }
-        guard state == .adjusting, let target = requested else { return }
-        let elapsed = ProcessInfo.processInfo.systemUptime-lastSend
-        if elapsed >= 0.21 && ((sentTarget.map {abs($0-target) >= 0.002} ?? true) || elapsed >= 1) { transmit(.update) }
+        if closing, latestTarget != nil { transmit(.end); return }
+        guard state == .adjusting, let target = latestTarget else { return }
+        let elapsed = now-lastSend
+        if elapsed >= 0.05 && ((sentTarget.map {abs($0-target) >= 0.001} ?? true) || elapsed >= 1) { transmit(.update) }
     }
     private func transmit(_ operation: VolumeRequest.Operation) {
         guard let sessionID, inFlight == nil else { return }
         if operation != .begin { sequence += 1 }
         let request = VolumeRequest(sessionID:sessionID,revision:revision,sequence:sequence,operation:operation,
-                                    target:operation == .begin ? nil : requested)
+                                    target:operation == .begin ? nil : latestTarget)
         inFlight = request.id; lastSend = ProcessInfo.processInfo.systemUptime
-        if operation != .begin { sentTarget = requested }
+        if operation != .begin { sentTarget = latestTarget }
         timeout?.cancel()
         timeout = Task { [weak self] in
             do { try await Task.sleep(for:.milliseconds(1300)) } catch { return }
@@ -85,7 +95,8 @@ final class LiveVolumeRemote: ObservableObject {
             self.lastSend = ProcessInfo.processInfo.systemUptime
             switch operation {
             case .begin:
-                self.requested = value
+                self.latestTarget = value; self.requested = value
+                self.lastDisplay = ProcessInfo.processInfo.systemUptime
                 if !self.closing {
                     self.state = .adjusting; self.message = "Raise / lower · lock when ready"
                     self.didBegin?()
@@ -101,7 +112,7 @@ final class LiveVolumeRemote: ObservableObject {
     }
     private func fail(_ message: String) {
         timeout?.cancel(); loop?.cancel(); inFlight = nil; sessionID = nil
-        requested = acknowledged; closing = false; state = .failed; self.message = message
+        latestTarget = acknowledged; requested = acknowledged; closing = false; state = .failed; self.message = message
         didFinish?()
     }
 }

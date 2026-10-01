@@ -16,7 +16,9 @@ final class MotionController: ObservableObject {
     @Published private(set) var armed = false
     @Published private(set) var armRemaining = 0
     @Published private(set) var rollDegrees = 0.0
+    @Published private(set) var pitchDegrees = 0.0
     @Published private(set) var yawDegrees = 0.0
+    @Published private(set) var volumeMotion: VolumeMotionFeedback?
     @Published private(set) var sampleRate = 0.0
     @Published private(set) var count = 0
     @Published private(set) var lastGesture = "None yet"
@@ -80,6 +82,7 @@ final class MotionController: ObservableObject {
         volume.didBegin = { [weak self] in
             guard let self, self.volumeClaimed, let motion = self.lastMotion, let level = self.volume.acknowledged else { return }
             self.tracker.begin(volume:level,acceleration:motion.acceleration,gravity:motion.gravity,time:motion.time)
+            self.volumeMotion = self.tracker.feedback
             self.haptic(.click)
         }
         volume.didFinish = { [weak self] in
@@ -94,7 +97,7 @@ final class MotionController: ObservableObject {
         armExpiryTask?.cancel(); armExpiryTask = nil
         if volume.ownsMotion { volume.finish(lock:false) }
         volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; viewingSince = nil; pendingMotion = []
-        viewingAngles = nil; extending = false; yawDegrees = 0
+        viewingAngles = nil; extending = false; yawDegrees = 0; rollDegrees = 0; pitchDegrees = 0; volumeMotion = nil
         gestures.reset()
         gestures.engine.threshold = configuration.threshold
         gestures.engine.armSeconds = configuration.armSeconds
@@ -410,9 +413,12 @@ final class MotionController: ObservableObject {
             if binding.action == .haptic { actionStatus = "Haptic only"; actionFailed = false }
             else { send(gesture) }
         }
-        if time-lastDisplay >= 0.1 {
+        if time-lastDisplay >= 0.05 {
             yawDegrees = (arbiter.yawOffset(motion.yaw) ?? 0)*180 / .pi
-            updateArmDisplay(at:now); rollDegrees = gestures.engine.relativeRoll*180 / .pi
+            updateArmDisplay(at:now)
+            rollDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.roll,from:$0.0)*180 / .pi} ?? 0
+            pitchDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.pitch,from:$0.1)*180 / .pi} ?? 0
+            if volumeMotion != nil { volumeMotion = tracker.feedback }
             let elapsed = time-(firstSample ?? time); sampleRate = elapsed > 0 ? Double(samples-1)/elapsed : 0
             lastDisplay = time
             if Date().timeIntervalSince1970 < link.streamUntil {
@@ -423,7 +429,8 @@ final class MotionController: ObservableObject {
                                     yaw:motion.yaw,ax:a.x,ay:a.y,az:a.z,
                                     rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z,hz:sampleRate,state:status,
                                     control:controlSnapshot(yaw:motion.yaw)))
-                if buffer.count >= 5 { link.sendFrames(buffer); buffer = [] }
+                // Small live batches avoid the previous half-second graph delay.
+                if buffer.count >= 2 { link.sendFrames(buffer); buffer = [] }
             } else { buffer = [] }
         }
     }
@@ -446,7 +453,8 @@ final class MotionController: ObservableObject {
                      requestedVolume:volumeClaimed ? volume.requested : nil,
                      acknowledgedVolume:volumeClaimed ? volume.acknowledged : nil,dryRun:volumeClaimed && volume.dryRun,
                      singleTapEnabled:tapModel?.validated == true,singleTapStatus:tapEnrollmentStatus,
-                     armRemaining:armRemaining,enrollmentRemaining:enrollmentRecording ? enrollmentRemaining : nil)
+                     armRemaining:armRemaining,enrollmentRemaining:enrollmentRecording ? enrollmentRemaining : nil,
+                     volumeMotion:volumeClaimed ? volumeMotion : nil)
     }
     private func send(_ gesture: GestureKind) {
         guard actionID == nil else { actionStatus = "Previous action is still running"; return }
