@@ -13,6 +13,22 @@ Version 0.1 was watch-only. Version 0.2 makes the existing root bundle a real iP
 
 The phone's Apple identifier has HomeKit enabled. Its generated entitlements include `com.apple.developer.homekit`. Home access is still granted by the user on the physical iPhone; enabling signing capability does not grant access to anyone's home.
 
+## Upgrading an existing Watch-only installation
+
+Apple's metadata for 0.2.0 (3.2) confirms **Watch-Only App: No** and **Device Family: iPhone, iPad, Apple Watch**. Both apps use one TestFlight listing.
+
+An existing 0.1 Watch-only installation can block the iPhone installation with: "A watchOS version of this app is already installed on your Apple Watch. To install this app on your iOS device, delete the watchOS version."
+
+If TestFlight shows that specific message:
+
+1. Delete **Wizardry** from the Apple Watch. This resets Wizardry's local Watch settings.
+2. Install the latest **0.2.0** build in TestFlight on the paired iPhone.
+3. Open Wizardry on the iPhone.
+4. In TestFlight, open Wizardry's **App Details → Apple Watch** and install its Watch companion.
+5. Open both apps and use iPhone **Setup → Sync settings to watch**.
+
+This is a one-time installation-order migration; subsequent paired-app builds update normally. If the expected build is not selected, use TestFlight's Previous Builds picker. Do not infer an archive defect from the old Watch installation alone; inspect the build metadata and the exact device error.
+
 ## Routine beta release
 
 1. Commit and push the intended changes to `main`.
@@ -39,6 +55,7 @@ Existing signing keys were reused from You Can't Park There with the owner's app
 | `APPLE_TEAM_ID` | Variable |
 | `APP_STORE_APP_ID` | Variable; `6817949081` |
 | `BUNDLE_ID` | Variable; `com.yangston.wizardry` |
+| `SPOTIFY_CLIENT_ID` | Variable; public Spotify developer client identifier, prefilled into signed builds |
 
 The team API key must manage certificates/profiles as well as upload. App Manager works for the established setup. The API key and distribution private key have different purposes. Never print them, commit them, paste them into chat, or regenerate the certificate key on every build. GitHub cannot reveal saved secret values.
 
@@ -54,6 +71,8 @@ Both Info.plists explicitly bind `CFBundleVersion` to `$(CURRENT_PROJECT_VERSION
 - **Volume Shortcuts:** optional user-created `Wizardry Volume Up` and `Wizardry Volume Down`; only launched while Wizardry is foreground on iPhone. Native volume/Now Playing remain available.
 
 HomeKit and local network prompts, music authorization, Spotify login, actual Watch gestures, and accessory actions must be verified on hardware. No sensor data is uploaded by the app to a cloud service.
+
+The Spotify developer app is now registered, its iOS bundle and redirect are saved, the owner's Spotify account is allowlisted, and the public Client ID is configured in the TestFlight environment. The user still completes Spotify authorization in the iPhone app. No client secret is embedded or required.
 
 ## Known delivery history
 
