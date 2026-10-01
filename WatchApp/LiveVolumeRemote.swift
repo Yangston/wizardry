@@ -80,6 +80,9 @@ final class LiveVolumeRemote: ObservableObject {
                 self.fail("Stopped, unconfirmed · "+reply.message); return
             }
             self.acknowledged = value; self.dryRun = reply.outcome == .dryRun
+            // Space updates from receipt of the previous acknowledgement. This
+            // guarantees receiver spacing even when network latency fluctuates.
+            self.lastSend = ProcessInfo.processInfo.systemUptime
             switch operation {
             case .begin:
                 self.requested = value
