@@ -112,6 +112,24 @@ class LiveVolumeTests(unittest.TestCase):
         self.assertEqual(self.audio.sets, [])
         self.assertEqual(self.audio.value, 0.37)
 
+    def test_authenticated_clock_sample_supports_skew_but_not_stale_requests(self):
+        server_clock = lambda: 102.0  # PC clock is two seconds ahead of phone
+        processor = CommandProcessor("test-token-123456789",clock=server_clock)
+        auth = "Bearer test-token-123456789"
+        status, ping = processor.handle(auth,{"id":str(uuid.uuid4()),"command":"ping","timestamp":100.0})
+        self.assertEqual(status,200)
+        self.assertTrue(ping["liveVolume"])
+        self.assertEqual(ping["serverTime"],102.0)
+        unaligned = self.request(createdAt=100.0)
+        self.assertEqual(processor.handle_volume(auth,unaligned)[0],408)
+        aligned = self.request(createdAt=100.0+(ping["serverTime"]-100.02))
+        status,reply = processor.handle_volume(auth,aligned)
+        self.assertEqual(status,200)
+        self.assertEqual(reply["serverTime"],102.0)
+        self.assertEqual(reply["volume"],0.5)
+        stale = self.request(createdAt=100.5)  # still rejected against PC clock
+        self.assertEqual(processor.handle_volume(auth,stale)[0],408)
+
     def test_real_http_auth_and_volume_round_trip(self):
         processor = CommandProcessor("test-token-123456789")
         server = HTTPServer(("127.0.0.1", 0), handler_for(processor))

@@ -38,7 +38,9 @@ class LiveVolumeProcessor:
         if type(timestamp) not in (int, float) or not math.isfinite(timestamp):
             return 400, {"error": "Invalid timestamp"}
         if timestamp > now+0.1 or now-timestamp > 1:
-            return 408, {"error": "Live volume request expired"}
+            age_ms = round((now-timestamp)*1000)
+            return 408, {"error": f"Live volume request expired (receiver minus request: {age_ms} ms)",
+                         "request_age_ms": age_ms}
         target = payload.get("target")
         if operation == "begin":
             if sequence != 0 or target is not None:
@@ -81,4 +83,4 @@ class LiveVolumeProcessor:
             self.active = None
             return 503, {"error": str(error)}
         return 200, {"outcome": "executed" if self.execute else "dryRun", "message": "Locked" if operation == "end" else "Volume accepted",
-                     "sessionID": session_id, "sequence": sequence, "volume": volume}
+                     "sessionID": session_id, "sequence": sequence, "volume": volume, "serverTime": self.clock()}

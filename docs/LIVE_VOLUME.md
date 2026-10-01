@@ -36,8 +36,10 @@ Enrollment counts assume you perform the instructed number of touches. They are 
 
 - `/volume` accepts authenticated `begin`, `update`, and `end` JSON requests containing UUID `id` and `sessionID`, `revision`, monotonic-in-session integer `sequence`, wall-clock `createdAt`, and normalized `target` for update/end. Begin uses sequence zero without a target.
 - Requests expire after one second, with up to 100 ms positive clock tolerance. Phone and receiver validate identities and order. Receiver sessions expire after six seconds without a request; unchanged live volume gets a heartbeat update each second.
+- Before begin, the phone samples receiver time through an authenticated ping and translates timestamps into the receiver clock domain. Each acknowledgement refreshes that sample. The original Watch/phone one-second deadline is also enforced, including time spent sampling the clock; return-trip delay makes the translated age more conservative. Clock alignment never retries or freshens an expired command.
 - The Watch allows one in-flight volume request and coalesces to the newest target, at no more than five updates per second. End bypasses the update limiter and drains after the current reply; the receiver rejects every later command for that session.
 - Network, stale-sample, and final-ack failures discard pending targets. No automatic retries or later replay occur. A failed lock is shown as **stopped, unconfirmed**. A request already accepted by the receiver may have executed even if its reply was lost.
+- HTTP rejection messages identify the status and server reason: 401/403 pairing token, 404/405 missing live-volume route, 408 expiry/clock, 409 session ordering, 429 rate limit, 503 audio device. A missing receiver time sample asks you to update/restart the receiver. Pairing tokens are redacted from displayed server errors.
 - Core Audio controls the default multimedia render endpoint, preserving mute state. Changing the default endpoint ends the session rather than silently adjusting a different device. Existing key-based commands retain their original behavior.
 
 ## Physical-device acceptance record

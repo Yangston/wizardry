@@ -69,7 +69,11 @@ class CommandProcessor:
             if self.execute:
                 self.volume_action(command)
                 executed = True
-        return 200, {"ok": True, "command": command, "executed": executed}
+        reply = {"ok": True, "command": command, "executed": executed}
+        if command == "ping":
+            reply["serverTime"] = self.clock()
+            reply["liveVolume"] = True
+        return 200, reply
 
 
 def windows_volume(command):
@@ -103,6 +107,9 @@ def handler_for(processor):
                 return
             if status == 200 and self.path == "/command":
                 print(f"{body['command']}: {'executed' if body['executed'] else 'dry run / ping'}", flush=True)
+            elif self.path == "/volume" and status != 200:
+                # Status and our own bounded reason only: no request body/token.
+                print(f"Live volume rejected: HTTP {status} - {body.get('error', 'Unknown error')}", flush=True)
             self.reply(status, body)
 
         def setup(self):

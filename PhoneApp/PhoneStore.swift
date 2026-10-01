@@ -158,26 +158,75 @@ final class PhoneStore: ObservableObject {
 }
 
 final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let clockLock = NSLock()
+    private var clockState: (endpoint: String, token: String, sample: ReceiverClockAlignment)?
+    private func clock(endpoint: String, token: String) -> ReceiverClockAlignment? {
+        clockLock.withLock {
+            guard let state = clockState, state.endpoint == endpoint, state.token == token,
+                  Date().timeIntervalSince1970-state.sample.receivedAt <= 30 else { return nil }
+            return state.sample
+        }
+    }
+    private func rememberClock(_ serverTime: Double, endpoint: String, token: String) {
+        guard serverTime.isFinite else { return }
+        let sample = ReceiverClockAlignment(serverTime:serverTime,receivedAt:Date().timeIntervalSince1970)
+        clockLock.withLock { clockState = (endpoint,token,sample) }
+    }
+    private func sampleClock(base: URL, token: String, deadline: Double) async -> ActionResult? {
+        let remaining = deadline-Date().timeIntervalSince1970
+        guard remaining > 0 else { return .failure("Live request expired before checking receiver time. Activate again.") }
+        var ping = URLRequest(url:base.appendingPathComponent("command"),timeoutInterval:min(1,remaining))
+        ping.httpMethod = "POST"
+        ping.setValue("Bearer "+token,forHTTPHeaderField:"Authorization")
+        ping.setValue("application/json",forHTTPHeaderField:"Content-Type")
+        ping.httpBody = try? JSONSerialization.data(withJSONObject:["id":UUID().uuidString,"command":"ping","timestamp":Date().timeIntervalSince1970])
+        do {
+            let (data,response) = try await session.data(for:ping)
+            guard let http = response as? HTTPURLResponse else { return .failure("Invalid receiver clock response") }
+            guard http.statusCode == 200 else { return .failure(ReceiverFailure.message(status:http.statusCode,data:data,token:token)) }
+            guard let body = try JSONSerialization.jsonObject(with:data) as? [String:Any],
+                  body["liveVolume"] as? Bool == true, let time = body["serverTime"] as? Double, time.isFinite else {
+                return .failure("Receiver needs an update: restart the latest receiver/server.py to support live volume and clock alignment.")
+            }
+            rememberClock(time,endpoint:base.absoluteString,token:token)
+            return nil
+        } catch { return .failure("Receiver time check failed: \(error.localizedDescription)") }
+    }
     func volume(_ event: VolumeRequest, endpoint: String, token: String) async -> VolumeReply {
         guard let base = URL(string:endpoint.trimmingCharacters(in:.whitespacesAndNewlines)),
               ["http","https"].contains(base.scheme ?? ""),base.host != nil,base.user == nil,base.password == nil,
               base.query == nil,base.fragment == nil,token.count >= 16,
               Date().timeIntervalSince1970-event.createdAt <= 1 else { return .failure("Pair receiver, or request expired",request:event) }
-        var request = URLRequest(url:base.appendingPathComponent("volume"),timeoutInterval:1)
+        if event.operation == .begin || clock(endpoint:base.absoluteString,token:token) == nil {
+            if let failure = await sampleClock(base:base,token:token,deadline:event.createdAt+1) {
+                return .failure(failure.message,request:event)
+            }
+        }
+        let now = Date().timeIntervalSince1970
+        guard let sample = clock(endpoint:base.absoluteString,token:token),
+              let timestamp = sample.translate(createdAt:event.createdAt,now:now), event.createdAt+1 > now else {
+            return .failure("Live request expired during clock alignment. Activate again; not retried.",request:event)
+        }
+        var wire = event; wire.createdAt = timestamp
+        var request = URLRequest(url:base.appendingPathComponent("volume"),timeoutInterval:min(1,event.createdAt+1-now))
         request.httpMethod = "POST"
         request.setValue("Bearer "+token,forHTTPHeaderField:"Authorization")
         request.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        request.httpBody = try? JSONEncoder().encode(event)
+        request.httpBody = try? JSONEncoder().encode(wire)
         do {
             let (data,response) = try await session.data(for:request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                return .failure("Receiver rejected live volume; check version, session, and clock",request:event)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure("Invalid receiver HTTP response",request:event)
+            }
+            guard http.statusCode == 200 else {
+                return .failure(ReceiverFailure.message(status:http.statusCode,data:data,token:token),request:event)
             }
             let result = try JSONDecoder().decode(VolumeReply.self,from:data)
             guard result.sessionID == event.sessionID, result.sequence == event.sequence,
                   let volume = result.volume, volume.isFinite, (0...1).contains(volume) else {
                 return .failure("Invalid volume acknowledgement",request:event)
             }
+            if let time = result.serverTime { rememberClock(time,endpoint:base.absoluteString,token:token) }
             return result
         } catch { return .failure("Volume connection failed: \(error.localizedDescription)",request:event) }
     }
@@ -199,7 +248,7 @@ final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendabl
         do {
             let (data,response) = try await session.data(for:request)
             guard let http = response as? HTTPURLResponse else { return .failure("Invalid receiver response") }
-            guard http.statusCode == 200 else { return .failure("Receiver error \(http.statusCode) · check token, version, and clock") }
+            guard http.statusCode == 200 else { return .failure(ReceiverFailure.message(status:http.statusCode,data:data,token:token)) }
             guard let body = try JSONSerialization.jsonObject(with:data) as? [String:Any], let executed = body["executed"] as? Bool else { return .failure("Invalid receiver acknowledgement") }
             return .init(outcome:executed ? .executed : .dryRun,message:executed ? "Computer: \(command)" : "Receiver acknowledged · dry run / ping")
         } catch { return .failure("Computer unavailable: \(error.localizedDescription)") }
