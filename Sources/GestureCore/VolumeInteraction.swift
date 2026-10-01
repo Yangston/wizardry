@@ -17,35 +17,49 @@ struct MotionQuaternion: Codable, Equatable {
     }
 }
 
-/// The watch-face normal is the local z axis. Only relative directions matter;
-/// no magnetometer heading or assumption about the wearer's left/right wrist.
+/// Extension follows the measured z/yaw change from the ready pose. Comparing
+/// face normals misses pure z rotation entirely. Signed wrap supports either
+/// wrist and a ready heading that is not zero.
 struct ExtensionArbiter {
     enum Route: Equatable { case transition, legacy, enterVolume }
-    private var viewingNormal: MotionVector?
-    private var stableNormal: MotionVector?
+    private var viewingYaw: Double?
+    private var stableYaw: Double?
     private var stableSince: Double?
-    private(set) var angle = 0.0
-    mutating func calibrate(_ attitude: MotionQuaternion) {
-        self = Self(); viewingNormal = attitude.normal
+    private var lastTime: Double?
+    private(set) var relativeYaw = 0.0
+    var angle: Double { abs(relativeYaw) }
+    mutating func calibrate(yaw: Double) {
+        self = Self(); if yaw.isFinite { viewingYaw = yaw }
     }
-    func isViewing(_ attitude: MotionQuaternion) -> Bool {
-        guard let origin = viewingNormal, let normal = attitude.normal else { return false }
-        return Self.angle(origin,normal) < 25 * .pi/180
+    static func offset(_ angle: Double, from origin: Double) -> Double {
+        atan2(sin(angle-origin),cos(angle-origin))
     }
-    static func angle(_ a: MotionVector, _ b: MotionVector) -> Double {
-        acos(min(1,max(-1,a.dot(b))))
+    func yawOffset(_ yaw: Double) -> Double? {
+        guard let origin = viewingYaw, yaw.isFinite else { return nil }
+        return Self.offset(yaw,from:origin)
     }
-    mutating func update(attitude: MotionQuaternion, acceleration: Double, rotation: Double, time: Double) -> Route {
-        guard let origin = viewingNormal, let normal = attitude.normal,
-              [acceleration,rotation,time].allSatisfy(\.isFinite) else { return .transition }
-        angle = Self.angle(origin,normal)
+    func isViewing(yaw: Double) -> Bool {
+        yawOffset(yaw).map {abs($0) < 25 * .pi/180} ?? false
+    }
+    mutating func interruptMotion() { stableYaw = nil; stableSince = nil; lastTime = nil }
+    mutating func update(yaw: Double, acceleration: Double, rotation: Double, time: Double) -> Route {
+        guard let offset = yawOffset(yaw),
+              [acceleration,rotation,time].allSatisfy(\.isFinite), acceleration >= 0, rotation >= 0 else {
+            interruptMotion(); return .transition
+        }
+        if let previous = lastTime {
+            if time <= previous { stableYaw = nil; stableSince = nil; return .transition }
+            if time-previous > 0.25 { stableYaw = nil; stableSince = nil }
+        }
+        lastTime = time
+        relativeYaw = offset
         // Shakes near the viewing pose retain their existing discrete recognizer.
         if angle < 25 * .pi/180, rotation < 0.8, acceleration >= 0.1 { return .legacy }
         guard acceleration < 0.1, rotation < 0.2 else {
-            stableSince = nil; stableNormal = nil; return .transition
+            stableSince = nil; stableYaw = nil; return .transition
         }
-        if stableNormal.map({Self.angle($0,normal) > 3 * .pi/180}) ?? true {
-            stableNormal = normal; stableSince = time
+        if stableYaw.map({abs(Self.offset(yaw,from:$0)) > 3 * .pi/180}) ?? true {
+            stableYaw = yaw; stableSince = time
         }
         guard time - (stableSince ?? time) >= 0.25 else { return .transition }
         return (70 * .pi/180...110 * .pi/180).contains(angle) ? .enterVolume : .legacy

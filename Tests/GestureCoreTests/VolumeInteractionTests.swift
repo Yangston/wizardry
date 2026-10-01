@@ -7,43 +7,65 @@ final class VolumeInteractionTests: XCTestCase {
     private func pose(_ radians: Double) -> MotionQuaternion {
         .init(x:sin(radians/2),y:0,z:0,w:cos(radians/2))
     }
-    func testOrthogonalEntryRequiresSettlingAndWorksOnEitherWrist() {
-        for sign in [-1.0,1.0] {
-            var arbiter = ExtensionArbiter(); arbiter.calibrate(pose(0))
-            XCTAssertEqual(arbiter.update(attitude:pose(sign * .pi/2),acceleration:0,rotation:1,time:0),.transition)
-            XCTAssertEqual(arbiter.update(attitude:pose(sign * .pi/2),acceleration:0,rotation:0,time:0.1),.transition)
-            XCTAssertEqual(arbiter.update(attitude:pose(sign * .pi/2),acceleration:0,rotation:0,time:0.36),.enterVolume)
-            XCTAssertTrue(arbiter.isViewing(pose(0.1)))
-            XCTAssertFalse(arbiter.isViewing(pose(.pi/2)))
+    func testYawEntryRequiresSettlingFromAnyHeadingOnEitherWrist() {
+        for origin in [0.0,0.7,3.13,-3.13] {
+            for sign in [-1.0,1.0] {
+                var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:origin)
+                let extended = ExtensionArbiter.offset(origin + sign * .pi/2,from:0)
+                XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:1,time:0),.transition)
+                for time in [0.1,0.2,0.3] {
+                    XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:0,time:time),.transition)
+                }
+                XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:0,time:0.36),.enterVolume)
+                XCTAssertEqual(arbiter.relativeYaw,sign * .pi/2,accuracy:0.00001)
+                XCTAssertTrue(arbiter.isViewing(yaw:origin+0.1))
+                XCTAssertFalse(arbiter.isViewing(yaw:extended))
+            }
         }
     }
-    func testLegacyPoseAndShakeRemainAvailableButTransitionsCannotFire() {
-        var arbiter = ExtensionArbiter(); arbiter.calibrate(pose(0))
-        XCTAssertEqual(arbiter.update(attitude:pose(0),acceleration:1.5,rotation:0,time:0),.legacy)
-        XCTAssertEqual(arbiter.update(attitude:pose(0.7),acceleration:0,rotation:0,time:0.1),.transition)
-        XCTAssertEqual(arbiter.update(attitude:pose(0.7),acceleration:0,rotation:0,time:0.4),.legacy)
+    func testPureZRotationEntersWithoutChangingWatchFaceNormal() {
+        let initial = MotionQuaternion(x:0,y:0,z:0,w:1)
+        let turned = MotionQuaternion(x:0,y:0,z:sin(.pi/4),w:cos(.pi/4))
+        XCTAssertEqual(initial.normal,turned.normal) // regression: old detector missed this
+        var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
+        for time in [0.0,0.1,0.2] { XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:time),.transition) }
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0.26),.enterVolume)
+        XCTAssertFalse(arbiter.isViewing(yaw:.pi/2)) // must not immediately stop volume
+        XCTAssertTrue(arbiter.isViewing(yaw:0))
+    }
+    func testTiltWithoutYawCannotEnterAndLegacyGesturesRemainAvailable() {
+        XCTAssertNotEqual(pose(0).normal,pose(.pi/2).normal)
+        var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
+        XCTAssertEqual(arbiter.update(yaw:0,acceleration:1.5,rotation:0,time:0),.legacy)
+        for time in [0.1,0.2,0.3] { _ = arbiter.update(yaw:0,acceleration:0,rotation:0,time:time) }
+        XCTAssertEqual(arbiter.update(yaw:0,acceleration:0,rotation:0,time:0.4),.legacy)
         var engine = GestureEngine()
         engine.calibrateAndArm(roll:0,pitch:0,sampleTime:0,readyTime:0)
-        for i in 1...50 {
-            XCTAssertNil(engine.update(roll:0.9,pitch:0,acceleration:0,time:Double(i)*0.01,suppressActions:true))
-        }
+        for i in 1...50 { XCTAssertNil(engine.update(roll:0.9,pitch:0,acceleration:0,time:Double(i)*0.01,suppressActions:true)) }
         var events: [GestureEngine.Event] = []
         for i in 51...75 {
             if let event = engine.update(roll:0.9,pitch:0,acceleration:0,time:Double(i)*0.01) { events.append(event) }
         }
         XCTAssertEqual(events,[.action(.rollPositive)])
-        // Suppression cannot erase cooldown / return-to-neutral requirement.
         _ = engine.update(roll:0.9,pitch:0,acceleration:0,time:0.76,suppressActions:true)
         for i in 77...100 { XCTAssertNil(engine.update(roll:0.9,pitch:0,acceleration:0,time:Double(i)*0.01)) }
     }
-    func testQuaternionSignWrapAndInvalidPose() {
-        let q = pose(.pi/2)
-        let reverse = MotionQuaternion(x:-q.x,y:-q.y,z:-q.z,w:-q.w)
-        XCTAssertEqual(q.normal,reverse.normal)
-        XCTAssertNil(MotionQuaternion(x:0,y:0,z:0,w:0).normal)
-        XCTAssertNil(MotionQuaternion(x:.nan,y:0,z:0,w:1).normal)
-        var arbiter = ExtensionArbiter(); arbiter.calibrate(pose(3.13))
-        XCTAssertTrue(arbiter.isViewing(pose(-3.13)))
+    func testYawWrapAndInvalidReference() {
+        var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:3.13)
+        XCTAssertTrue(arbiter.isViewing(yaw:-3.13))
+        XCTAssertEqual(arbiter.yawOffset(-3.13) ?? 1,0.0231853,accuracy:0.00001)
+        arbiter.calibrate(yaw:.nan)
+        XCTAssertNil(arbiter.yawOffset(0))
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0),.transition)
+    }
+    func testGapDuplicateAndInvalidSamplesRequireFreshSettling() {
+        var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
+        _ = arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0)
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1),.transition)
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1),.transition)
+        XCTAssertEqual(arbiter.update(yaw:.nan,acceleration:0,rotation:0,time:1.1),.transition)
+        for time in [1.2,1.3,1.4] { XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:time),.transition) }
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1.46),.enterVolume)
     }
     func testVerticalProjectionReversalsPauseAndBounds() {
         XCTAssertEqual(VerticalVolumeTracker.vertical(.init(x:0,y:0,z:0.1),gravity),0.980665,accuracy:0.00001)

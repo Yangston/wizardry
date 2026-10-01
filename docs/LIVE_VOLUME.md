@@ -7,12 +7,12 @@ The double touch uses the user's existing AssistiveTouch **Activate Wizardry** S
 ## Setup and use
 
 1. Update both apps and the Windows receiver. Pair the receiver, run it with `--execute`, and select the Computer profile. Without `--execute`, volume acknowledgements are explicitly dry runs starting at 50%.
-2. Activate while looking at the watch; hold still for 250 ms. Extension has priority over discrete gestures. The watch-face normal must turn 70–110 degrees from the calibrated pose and settle for 250 ms.
+2. Activate while looking at the watch; hold still for 250 ms. Extension has priority over discrete gestures. The wrapped z / yaw change must reach 70–110 degrees from the ready pose and settle for 250 ms. Either sign is accepted. A pure yaw turn does not change the watch-face normal, so normals are not the extension criterion.
 3. The receiver reads Windows' current default multimedia output volume. Wait for the entry haptic, then make short upward/downward movements with pauses. About 20 cm adds/subtracts 20 percentage points. A pause holds the current volume and resets estimated velocity; it does not snap to a physical height.
 4. Use **Lock volume** before enrolling your tap. After enrollment, a single thumb-index touch locks. The detector waits 450 ms from its candidate onset for a possible second touch. Classification can add latency if a second candidate is still being evaluated.
-5. **Locking** means the final request is pending. **Locked** means the receiver acknowledged the final value and closed the session. Requested and acknowledged percentages are displayed separately; dry-run acknowledgement is not audio execution.
+5. **Locking** means the final request is pending. **Locked** means the receiver acknowledged the final value and closed the session. Requested and acknowledged percentages, yaw change, mode and tap status appear on the Watch and on iPhone Control / Live; dry-run acknowledgement is not audio execution.
 
-Volume ends after five seconds without meaningful movement, returning to the viewing pose for 250 ms, session expiry, settings changes, leaving the app, or interrupted sensing. Activate again before another adjustment. Brief inactive foreground periods may continue only while fresh samples arrive. No additional background runtime is requested.
+Volume ends after five seconds without meaningful movement, returning to within 25 degrees of the viewing yaw for 250 ms, session expiry, settings changes, leaving the app, or interrupted sensing. Activate again before another adjustment. Brief inactive foreground periods may continue only while fresh samples arrive. No additional background runtime is requested.
 
 ## Learn the single touch
 
@@ -54,3 +54,8 @@ Synthetic replay and CI validate control logic; actual finger recognition, inert
 | Left/right wrist, crown orientation, screen dimming, interruption | Pass | Not measured |
 
 Record watch model, watchOS version, wrist/crown orientation, delivered raw/device-motion rates, receiver mode, trial counts, false actions, drift, measured latency, and battery observations when testing. Do not replace these pending fields with simulator results.
+
+
+## Yaw diagnostics
+
+The iPhone Control and Live screens show the wrapped **Yaw change from ready pose**. Looking at the Watch at the ready haptic establishes zero; extension should approach +90 or -90 degrees. The attitude graph retains raw yaw for comparison. Entry is 70-110 degrees held for 250 ms; return-to-viewing uses less than 25 degrees. If motion becomes stale, the phone labels readings as last received rather than live. Control and Live request bounded local telemetry while foreground; other tabs stop the stream.

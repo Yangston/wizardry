@@ -16,6 +16,7 @@ final class MotionController: ObservableObject {
     @Published private(set) var armed = false
     @Published private(set) var armRemaining = 0
     @Published private(set) var rollDegrees = 0.0
+    @Published private(set) var yawDegrees = 0.0
     @Published private(set) var sampleRate = 0.0
     @Published private(set) var count = 0
     @Published private(set) var lastGesture = "None yet"
@@ -34,6 +35,8 @@ final class MotionController: ObservableObject {
     private var lastAccepted: Double?
     private var lastDelivery = 0.0
     private var arbiter = ExtensionArbiter()
+    private var viewingAngles: (Double,Double)?
+    private var extending = false
     private var tracker = VerticalVolumeTracker()
     private var volumeClaimed = false
     private var tapFrozen = false
@@ -91,6 +94,7 @@ final class MotionController: ObservableObject {
         armExpiryTask?.cancel(); armExpiryTask = nil
         if volume.ownsMotion { volume.finish(lock:false) }
         volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; viewingSince = nil; pendingMotion = []
+        viewingAngles = nil; extending = false; yawDegrees = 0
         gestures.reset()
         gestures.engine.threshold = configuration.threshold
         gestures.engine.armSeconds = configuration.armSeconds
@@ -319,7 +323,7 @@ final class MotionController: ObservableObject {
         armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
         if volumeClaimed { status = volume.message }
         else if activation.isPending { status = "Hold still · preparing gestures" }
-        else if armed { status = "Armed · \(armRemaining)s" }
+        else if armed { status = "Ready · yaw \(Int(yawDegrees.rounded()))° · \(armRemaining)s" }
         else { status = "Activate Wizardry or tap Arm" }
     }
     func testHaptic() { haptic(.click) }
@@ -331,11 +335,12 @@ final class MotionController: ObservableObject {
               motion.attitude.normal != nil, time <= now, now-time <= 0.25,
               lastAccepted.map({time > $0}) ?? true else {
             if volumeClaimed { endVolume(lock:false) }
-            gestures.engine.interruptMotion(at:now); return
+            gestures.engine.interruptMotion(at:now); arbiter.interruptMotion(); return
         }
         if let previous = lastAccepted, time-previous > 0.25 {
             if volumeClaimed { endVolume(lock:false) }
             gestures.engine.interruptMotion(at:now)
+            arbiter.interruptMotion()
             cancelEnrollment("Recording interrupted - repeat this step")
         }
         lastAccepted = time; lastDelivery = now; lastMotion = motion
@@ -351,7 +356,8 @@ final class MotionController: ObservableObject {
             case .ready:
                 cancelShortcutActivation()
                 gestures.calibrateAndArm(roll:motion.roll,pitch:motion.pitch,sampleTime:time,readyTime:now)
-                arbiter.calibrate(motion.attitude); capture?.reset(model:tapModel)
+                arbiter.calibrate(yaw:motion.yaw); viewingAngles = (motion.roll,motion.pitch)
+                capture?.reset(model:tapModel)
                 scheduleArmExpiry(); armed = true; status = "Ready - extend arm or make a gesture"
                 haptic(.success)
             case .timedOut: stop("Activation timed out - activate again"); return
@@ -360,7 +366,7 @@ final class MotionController: ObservableObject {
             }
         } else if volumeClaimed {
             if volume.state == .adjusting {
-                if now < ignoreTapsUntil || arbiter.isViewing(motion.attitude) {
+                if now < ignoreTapsUntil || arbiter.isViewing(yaw:motion.yaw) {
                     tracker.freeze(at:time); pendingMotion = []
                 } else if tapFrozen {
                     pendingMotion.append(motion)
@@ -372,7 +378,7 @@ final class MotionController: ObservableObject {
                     }
                     pendingMotion = []; volume.setTarget(tracker.target)
                 }
-                if arbiter.isViewing(motion.attitude) {
+                if arbiter.isViewing(yaw:motion.yaw) {
                     if viewingSince == nil { viewingSince = time }
                     if time-(viewingSince ?? time) >= 0.25 { endVolume(lock:false) }
                 } else { viewingSince = nil }
@@ -383,7 +389,8 @@ final class MotionController: ObservableObject {
             guard gestures.allowsMotion(at:now) else { pause("Activate again to resume"); return }
             var suppress = volume.ownsMotion
             if configuration.selectedProfileID == "computer", gestures.engine.isArmed(at:now) {
-                let route = arbiter.update(attitude:motion.attitude,acceleration:acceleration,rotation:rotation,time:time)
+                let route = arbiter.update(yaw:motion.yaw,acceleration:acceleration,rotation:rotation,time:time)
+                extending = route == .transition && abs(arbiter.relativeYaw) >= 25 * .pi/180
                 suppress = suppress || route != .legacy
                 if route == .enterVolume, !volume.ownsMotion {
                     volumeClaimed = true; armExpiryTask?.cancel(); armed = false; armRemaining = 0
@@ -404,17 +411,42 @@ final class MotionController: ObservableObject {
             else { send(gesture) }
         }
         if time-lastDisplay >= 0.1 {
+            yawDegrees = (arbiter.yawOffset(motion.yaw) ?? 0)*180 / .pi
             updateArmDisplay(at:now); rollDegrees = gestures.engine.relativeRoll*180 / .pi
             let elapsed = time-(firstSample ?? time); sampleRate = elapsed > 0 ? Double(samples-1)/elapsed : 0
             lastDisplay = time
             if Date().timeIntervalSince1970 < link.streamUntil {
                 let a = motion.acceleration, r = motion.rotation, g = motion.gravity
-                buffer.append(.init(time:Date().timeIntervalSince1970,roll:gestures.engine.relativeRoll,
-                                    pitch:gestures.engine.relativePitch,yaw:motion.yaw,ax:a.x,ay:a.y,az:a.z,
-                                    rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z,hz:sampleRate,state:status))
+                buffer.append(.init(time:Date().timeIntervalSince1970,
+                                    roll:viewingAngles.map {ExtensionArbiter.offset(motion.roll,from:$0.0)} ?? 0,
+                                    pitch:viewingAngles.map {ExtensionArbiter.offset(motion.pitch,from:$0.1)} ?? 0,
+                                    yaw:motion.yaw,ax:a.x,ay:a.y,az:a.z,
+                                    rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z,hz:sampleRate,state:status,
+                                    control:controlSnapshot(yaw:motion.yaw)))
                 if buffer.count >= 5 { link.sendFrames(buffer); buffer = [] }
             } else { buffer = [] }
         }
+    }
+    private func controlSnapshot(yaw: Double) -> WatchControlSnapshot {
+        let phase: WatchControlSnapshot.Phase
+        if navigationPath.last == .enrollment { phase = .enrolling }
+        else if activation.isPending { phase = .calibrating }
+        else if volumeClaimed {
+            switch volume.state {
+            case .beginning: phase = .volumeStarting
+            case .adjusting: phase = .adjustingVolume
+            case .locking: phase = .lockingVolume
+            case .locked: phase = .locked
+            case .failed: phase = .failed
+            default: phase = .stopped
+            }
+        } else if armed { phase = extending ? .extending : .armed }
+        else { phase = .unarmed }
+        return .init(phase:phase,profileID:configuration.selectedProfileID,relativeYaw:arbiter.yawOffset(yaw),
+                     requestedVolume:volumeClaimed ? volume.requested : nil,
+                     acknowledgedVolume:volumeClaimed ? volume.acknowledged : nil,dryRun:volumeClaimed && volume.dryRun,
+                     singleTapEnabled:tapModel?.validated == true,singleTapStatus:tapEnrollmentStatus,
+                     armRemaining:armRemaining,enrollmentRemaining:enrollmentRecording ? enrollmentRemaining : nil)
     }
     private func send(_ gesture: GestureKind) {
         guard actionID == nil else { actionStatus = "Previous action is still running"; return }

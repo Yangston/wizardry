@@ -14,6 +14,7 @@ final class PhoneStore: ObservableObject {
     @Published private(set) var lastTelemetry = Date.distantPast
     @Published private(set) var history: [ActionLog] = []
     @Published private(set) var busy = false
+    @Published private(set) var lastVolumeReply: VolumeReply?
     let link = WatchLink()
     let home = HomeController()
     let spotify = SpotifyController()
@@ -38,7 +39,7 @@ final class PhoneStore: ObservableObject {
         link.framesReceived = { [weak self] frames in
             guard let self else { return }
             let clean = frames.filter { frame in
-                [frame.time,frame.roll,frame.pitch,frame.yaw,frame.ax,frame.ay,frame.az,frame.rx,frame.ry,frame.rz,frame.gx,frame.gy,frame.gz,frame.hz].allSatisfy(\.isFinite) && abs(Date().timeIntervalSince1970-frame.time) < 5
+                [frame.time,frame.roll,frame.pitch,frame.yaw,frame.ax,frame.ay,frame.az,frame.rx,frame.ry,frame.rz,frame.gx,frame.gy,frame.gz,frame.hz].allSatisfy(\.isFinite) && abs(Date().timeIntervalSince1970-frame.time) < 5 && (frame.control?.isValid ?? true)
             }
             guard !clean.isEmpty else { return }
             self.frames.append(contentsOf:clean)
@@ -69,6 +70,11 @@ final class PhoneStore: ObservableObject {
             Task {
                 let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
                 let result = await self.network.volume(request,endpoint:self.endpoint,token:PairingKeychain.load())
+                self.lastVolumeReply = result
+                if request.operation == .end || result.outcome == .failed {
+                    self.history.insert(.init(title:"Live computer volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
+                    if self.history.count > 30 { self.history.removeLast() }
+                }
                 self.volumeBusy = false
                 reply(result)
                 if task != .invalid { UIApplication.shared.endBackgroundTask(task) }

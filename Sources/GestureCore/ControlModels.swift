@@ -138,6 +138,45 @@ struct MotionFrame: Codable, Identifiable {
     var gz: Double
     var hz: Double
     var state: String
+    // Optional for compatibility with previous Watch telemetry.
+    var control: WatchControlSnapshot? = nil
+}
+
+struct WatchControlSnapshot: Codable, Equatable {
+    enum Phase: String, Codable {
+        case unarmed, calibrating, armed, extending, volumeStarting, adjustingVolume, lockingVolume, locked, stopped, failed, enrolling
+        var title: String {
+            switch self {
+            case .unarmed: return "Activate on Watch"
+            case .calibrating: return "Hold still facing Watch"
+            case .armed: return "Ready to extend"
+            case .extending: return "Extending arm"
+            case .volumeStarting: return "Reading computer volume"
+            case .adjustingVolume: return "Adjusting volume"
+            case .lockingVolume: return "Locking volume"
+            case .locked: return "Volume locked"
+            case .stopped: return "Stopped · activate again"
+            case .failed: return "Volume unconfirmed"
+            case .enrolling: return "Learning finger tap"
+            }
+        }
+    }
+    var phase: Phase
+    var profileID: String
+    var relativeYaw: Double?
+    var requestedVolume: Double?
+    var acknowledgedVolume: Double?
+    var dryRun: Bool
+    var singleTapEnabled: Bool
+    var singleTapStatus: String
+    var armRemaining: Int
+    var enrollmentRemaining: Int?
+    var isValid: Bool {
+        [requestedVolume,acknowledgedVolume].allSatisfy {$0.map {$0.isFinite && (0...1).contains($0)} ?? true} &&
+        (relativeYaw.map {$0.isFinite && abs($0) <= .pi+0.001} ?? true) &&
+        (0...20).contains(armRemaining) && (enrollmentRemaining.map {(0...300).contains($0)} ?? true) &&
+        singleTapStatus.count <= 500 && profileID.count <= 128
+    }
 }
 
 struct GestureRequest: Codable {

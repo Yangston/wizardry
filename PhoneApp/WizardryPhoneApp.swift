@@ -1,6 +1,7 @@
 ﻿import SwiftUI
 import Charts
 import MediaPlayer
+import Combine
 
 @main
 struct WizardryPhoneApp: App {
@@ -12,12 +13,27 @@ struct WizardryPhoneApp: App {
 
 struct PhoneRootView: View {
     @ObservedObject var store: PhoneStore
+    private enum Tab: Hashable { case control, motions, live, setup }
+    @State private var tab = Tab.control
+    @Environment(\.scenePhase) private var scenePhase
+    private var streamsMotion: Bool { scenePhase == .active && (tab == .control || tab == .live) }
     var body: some View {
-        TabView {
-            ControlDashboard(store:store,link:store.link).tabItem { Label("Control",systemImage:"wand.and.stars") }
-            MotionMappings(store:store).tabItem { Label("Motions",systemImage:"hand.wave") }
-            LiveMotionView(store:store,link:store.link).tabItem { Label("Live",systemImage:"waveform.path.ecg") }
-            SetupView(store:store,link:store.link,home:store.home,spotify:store.spotify).tabItem { Label("Setup",systemImage:"gearshape") }
+        TabView(selection:$tab) {
+            ControlDashboard(store:store,link:store.link).tabItem { Label("Control",systemImage:"wand.and.stars") }.tag(Tab.control)
+            MotionMappings(store:store).tabItem { Label("Motions",systemImage:"hand.wave") }.tag(Tab.motions)
+            LiveMotionView(store:store,link:store.link).tabItem { Label("Live",systemImage:"waveform.path.ecg") }.tag(Tab.live)
+            SetupView(store:store,link:store.link,home:store.home,spotify:store.spotify).tabItem { Label("Setup",systemImage:"gearshape") }.tag(Tab.setup)
+        }
+        .task(id:streamsMotion) {
+            guard streamsMotion else { store.link.stopStream(); return }
+            while !Task.isCancelled {
+                store.link.requestStream()
+                do { try await Task.sleep(for:.seconds(10)) } catch { break }
+            }
+        }
+        .onDisappear { store.link.stopStream() }
+        .onReceive(store.link.$reachable.removeDuplicates()) { reachable in
+            if reachable && streamsMotion { store.link.requestStream() }
         }
     }
 }
@@ -40,13 +56,10 @@ struct ControlDashboard: View {
                     Picker("Control profile",selection:$store.configuration.selectedProfileID) {
                         ForEach(store.configuration.profiles) { Text($0.name).tag($0.id) }
                     }.pickerStyle(.segmented).onChange(of:store.configuration.selectedProfileID) { _,_ in store.saveConfiguration() }
-                    VStack(alignment:.leading,spacing:8) {
-                        Label("Raise · Wake · Act",systemImage:"sparkles").font(.headline)
-                        Text("Start a session on your watch. Raise your wrist to resume, twist + / − / + / − within 2.5 seconds, then return to neutral. A double haptic means armed. Make an action within \(Int(store.configuration.armSeconds)) seconds.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        Text("Detection pauses when watchOS suspends the app. A custom gesture cannot launch a closed app.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("Try an action").font(.title2.bold())
+                    WatchControlCard(store:store)
+                    VolumeFlowGuide(computer:store.configuration.selectedProfileID == "computer")
+                    NavigationLink { FingerTapSetupGuide() } label: { Label("Single finger tap setup",systemImage:"hand.pinch") }
+                    Text("Test discrete actions").font(.title2.bold())
                     Text("These buttons run your mappings now. Home actions need a selected device or scene.").font(.caption).foregroundStyle(.secondary)
                     ForEach(store.configuration.selectedProfile.bindings.filter(\.enabled)) { binding in
                         Button { store.test(binding) } label: {
@@ -92,7 +105,7 @@ struct MotionMappings: View {
                     Text("Editing a profile does not select it. Select the active profile on Control.").font(.caption)
                 }
                 if let index = store.configuration.profiles.firstIndex(where:{$0.id == editProfile}) {
-                    Section("Gesture → action") {
+                    Section("Other wrist actions") {
                         ForEach(store.configuration.profiles[index].bindings) { binding in
                             NavigationLink {
                                 MappingEditor(draft:binding,home:store.home) { updated in
@@ -109,15 +122,22 @@ struct MotionMappings: View {
                         }
                     }
                 }
-                Section("Activation and sensitivity") {
-                    Text("Double finger touch runs your AssistiveTouch Activate Wizardry shortcut. Hold still facing the watch for the ready haptic. The Arm button also works. There is no double-twist wake.").font(.caption)
-                    Text("Computer volume: extend until the watch face turns about 90°, then raise/lower in short strokes. Learn single finger tap on the watch to lock; keep AssistiveTouch single touch at None. Experimental height estimates can drift.").font(.caption)
+                if editProfile == "computer" {
+                    Section("Live computer volume") {
+                        Text("Extend your arm so z / yaw changes about 90° from the ready pose. After the entry haptic, raise/lower vertically in short strokes with pauses. A learned single finger touch or Lock volume ends adjustment.").font(.caption)
+                        Text("Extension takes priority over the discrete mappings above. While adjusting volume, other wrist actions are paused.").font(.caption).foregroundStyle(.secondary)
+                        NavigationLink("Single finger tap setup") { FingerTapSetupGuide() }
+                    }
+                }
+                Section("Activation and discrete-action sensitivity") {
+                    Text("Double finger touch runs Activate Wizardry. Hold still looking at the Watch for the ready haptic, or use Arm on the Watch.").font(.caption)
                     VStack(alignment:.leading) {
-                        Text("Action angle: \(Int(store.configuration.threshold * 180 / .pi))°")
+                        Text("Discrete twist / tilt angle: \(Int(store.configuration.threshold * 180 / .pi))°")
                         Slider(value:$store.configuration.threshold,in:0.45...1.2,step:0.05,onEditingChanged: { if !$0 { store.saveConfiguration() } })
                     }
-                    Stepper("Armed for \(Int(store.configuration.armSeconds)) seconds",value:$store.configuration.armSeconds,in:3...20,step:1)
+                    Stepper("Start an action within \(Int(store.configuration.armSeconds)) seconds",value:$store.configuration.armSeconds,in:3...20,step:1)
                         .onChange(of:store.configuration.armSeconds) { _,_ in store.saveConfiguration() }
+                    Text("This is the time to enter volume mode or start another action. Once volume starts, it stays active until lock, five seconds without movement, returning to the viewing yaw, or interrupted sensing.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Ideas to try") {
                     Label("Reading: a twist turns on your lamp; a shake pauses Spotify.",systemImage:"book")
@@ -174,7 +194,6 @@ struct MappingEditor: View {
 struct LiveMotionView: View {
     @ObservedObject var store: PhoneStore
     @ObservedObject var link: WatchLink
-    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -184,29 +203,22 @@ struct LiveMotionView: View {
                         VStack(alignment:.leading,spacing:6) {
                             Label(live ? "Live from Apple Watch" : "Waiting for live motion",systemImage:live ? "dot.radiowaves.left.and.right" : "pause.circle")
                                 .foregroundStyle(live ? .green : .orange).font(.headline)
-                            Text(live ? "\(Int(store.frames.last?.hz ?? 0)) Hz capture · 10 Hz display · local transfer" : "Open Wizardry and start a session on your watch. Keep this screen open on your phone.")
+                            Text(live ? "\(Int(store.frames.last?.hz ?? 0)) Hz capture · 10 Hz display · local transfer" : "Activate Wizardry on the Watch and hold still for the ready haptic. Keep Control or Live open on your phone.")
                                 .font(.caption).foregroundStyle(.secondary)
                             if !live && !store.frames.isEmpty { Text("Graphs show the last received data, not current readings.").font(.caption).foregroundStyle(.orange) }
                             if let sample = store.frames.last { Text("Watch: \(sample.state)").font(.caption) }
                         }
                     }
+                    WatchControlCard(store:store)
                     SensorChart(title:"User acceleration",unit:"g",frames:store.frames,keys:[\.ax,\.ay,\.az])
                     SensorChart(title:"Rotation rate",unit:"rad/s",frames:store.frames,keys:[\.rx,\.ry,\.rz])
-                    SensorChart(title:"Relative roll / pitch · yaw",unit:"degrees",frames:store.frames,keys:[\.roll,\.pitch,\.yaw],scale:180 / .pi)
+                    SensorChart(title:"Roll / pitch relative · yaw raw",unit:"degrees",frames:store.frames,keys:[\.roll,\.pitch,\.yaw],scale:180 / .pi)
                     SensorChart(title:"Gravity",unit:"g",frames:store.frames,keys:[\.gx,\.gy,\.gz])
-                    Text("x / y / z use the watch sensor's axes; the attitude graph uses roll / pitch / yaw. Roll and pitch are relative to the pose at session start or resume. Data stays on your devices and is not saved as a recording.")
+                    Text("Arm extension uses the wrapped change in z / yaw from the ready haptic, shown above. The graph keeps raw yaw for comparison; roll and pitch are relative to the ready pose. Data stays on your devices and is not saved as a recording.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(20)
             }.navigationTitle("Live motion")
                 .toolbar { Button("Clear") { store.clearFrames() } }
-                .task {
-                    while !Task.isCancelled {
-                        if scenePhase == .active { link.requestStream() }
-                        do { try await Task.sleep(for:.seconds(10)) } catch { break }
-                    }
-                }
-                .onDisappear { link.stopStream() }
-                .onChange(of:scenePhase) { _,phase in if phase == .active { link.requestStream() } else { link.stopStream() } }
         }
     }
 }
@@ -255,8 +267,9 @@ struct SetupView: View {
                     Label(link.status,systemImage:"applewatch")
                     Text("Wizardry uses your existing iPhone–Watch pairing. Install both apps, open Wizardry on each, then sync. No separate watch pairing code is needed.")
                     Button("Sync settings to watch") { store.saveConfiguration() }
-                    Text("For hands-free re-entry: raise your wrist and double-touch your fingers to run your AssistiveTouch Activate Wizardry shortcut. Hold still facing the watch for the ready haptic. Keep AssistiveTouch single touch at None. The Arm button also works; there is no separate wake sequence.")
+                    Text("Raise your wrist and double-touch your fingers to run Activate Wizardry. Hold still looking at the Watch for the ready haptic. Arm on the Watch also works. Keep AssistiveTouch single touch at None.")
                         .font(.caption)
+                    NavigationLink("Single finger tap setup") { FingerTapSetupGuide() }
                 }
                 Section("2 · Computer receiver") {
                     TextField("http://192.168.x.x:8765",text:$store.endpoint).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -265,6 +278,7 @@ struct SetupView: View {
                     Text(store.pairingStatus).font(.caption)
                     Link("Receiver installation instructions",destination:URL(string:"https://github.com/Yangston/wizardry/tree/main/receiver")!)
                     Text("The phone sends commands to the receiver on your local network. Tokens are stored in the iPhone Keychain and are never sent to the watch. Start with dry run. HTTP is intended for a trusted private network.").font(.caption)
+                    Text("Live volume needs the updated receiver running with --execute. Select Computer on Control, activate on the Watch, then extend to about 90° of yaw change. Dry run acknowledges simulated volume only.").font(.caption)
                 }
                 Section("3 · Apple Home") {
                     Button("Connect / refresh Apple Home") { store.connectHome() }
@@ -296,8 +310,8 @@ struct SetupView: View {
                     Text("Select Apple Music actions in Motions if you use Apple's Music app.").font(.caption)
                 }
                 Section("Session behavior") {
-                    Text("Sessions last up to 30 minutes. Once armed, brief dimming preserves the remaining armed time and gestures can continue if motion samples keep arriving. Leaving the app disarms actions. Late samples are discarded; return to neutral after a sensing interruption. Wizardry cannot keep the screen awake or recognize motion while watchOS suspends sensing.")
-                    Text("Commands expire after 5 seconds and are not retried or queued. A gesture haptic confirms recognition; the result on the watch reports execution, a handoff, or a failure.")
+                    Text("Sessions last up to 30 minutes. Activate while looking at the Watch to capture the yaw reference. Enter an action within the armed window. Live volume then remains active until lock, five seconds without movement, return to the viewing yaw, or interrupted sensing. Fresh motion is required during dimming; leaving Wizardry disarms controls.")
+                    Text("Discrete commands expire after five seconds; live volume messages expire after one second. Neither is retried or queued for later replay. A haptic confirms recognition. Watch and phone status show requested volume, receiver acknowledgement, dry runs, and errors separately.")
                 }.font(.caption)
             }.navigationTitle("Setup")
         }

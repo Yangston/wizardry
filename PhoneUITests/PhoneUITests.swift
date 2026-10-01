@@ -5,7 +5,21 @@ final class PhoneUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.navigationBars["Wizardry"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.staticTexts["Live Watch status"].exists)
+        XCTAssertTrue(app.staticTexts["Activate · Extend · Adjust · Lock"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "2.5 seconds")).firstMatch.exists)
         capture("01-control")
+        let tapSetup = app.buttons["Single finger tap setup"].firstMatch
+        for _ in 0..<6 {
+            if tapSetup.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(tapSetup.isHittable)
+        tapSetup.tap()
+        XCTAssertTrue(app.navigationBars["Learn single tap"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.staticTexts["Open Wizardry → Learn single finger tap."].exists)
+        capture("01b-tap-setup")
+        app.navigationBars.buttons.firstMatch.tap()
         app.tabBars.buttons["Motions"].tap()
         XCTAssertTrue(app.navigationBars["Motions"].waitForExistence(timeout:5))
         capture("02-motions")

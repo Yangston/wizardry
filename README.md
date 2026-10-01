@@ -25,13 +25,13 @@ In **Setup** on iPhone:
 
 See [release and account setup](docs/SETUP.md) and [the first-wave device checklist](docs/WAVE_ONE.md).
 
-## Raise · Wake · Act
+## Activate · Extend · Adjust · Lock
 
 **Touch-free entry:** configure [AssistiveTouch launch](docs/SETUP.md#assistivetouch-launch), then **raise wrist → double finger touch → hold still → ready haptic → wrist action**. The shortcut opens Wizardry's control screen, starts a 30-minute session, and arms after 250 ms of steady motion. The configured armed window starts when calibration completes; the launch gesture cannot also execute an action. Return to neutral between actions. Repeat the shortcut whenever you need to open and arm Wizardry again.
 
 **Manual entry:** tap **Arm**, hold still while looking at the watch, and wait for the ready haptic. There is no separate twist-to-wake sequence.
 
-**Live computer volume (experimental):** with the Computer profile selected, extend your arm until the watch face is roughly perpendicular to the calibrated viewing pose. After the entry haptic, raise/lower your hand in short strokes with pauses. Volume follows estimated vertical displacement, starting at the actual Windows volume. A personalized single finger touch or the **Lock volume** button stops adjustment; five seconds without movement also ends it. Keep AssistiveTouch single touch at **None**. Requested and acknowledged volume are shown separately. See [enrollment, protocol, and pending hardware validation](docs/LIVE_VOLUME.md).
+**Live computer volume (experimental):** with the Computer profile selected, extend your arm until z / yaw changes about 90 degrees from the pose at the ready haptic. After the entry haptic, raise/lower your hand in short strokes with pauses. Volume follows estimated vertical displacement, starting at the actual Windows volume. A personalized single finger touch or the **Lock volume** button stops adjustment; five seconds without movement also ends it. Keep AssistiveTouch single touch at **None**. Requested and acknowledged volume are shown separately. See [enrollment, protocol, and pending hardware validation](docs/LIVE_VOLUME.md).
 
 | Motion | Computer default | Phone default | Home default |
 |---|---|---|---|
@@ -71,7 +71,7 @@ Computer HTTP is intended for a trusted private LAN. HTTPS with a trusted certif
 - `python -m unittest discover -s scripts/tests -v`
 - `swift test` on a system with Swift, or GitHub Actions.
 - `project.yml` is the XcodeGen source. `Wizardry` builds the Watch; `WizardryPhone` builds/tests the companion; `WizardryDistribution` archives both.
-- CI tests gesture/wake state, command gating, receiver HTTP, both native targets, archive metadata, and iPhone UI navigation with screenshot artifacts.
+- CI tests explicit activation, relative-yaw extension, command gating, receiver HTTP, both native targets, archive metadata, and iPhone UI navigation with screenshot artifacts.
 - Signed distribution remains manual, main-only, and gated by successful CI on the exact commit.
 
 Simulator and CI success cannot verify real gestures, paired-device background delivery, Home accessories, Spotify authorization, battery use, or installation. Record those on hardware in the device checklist.
