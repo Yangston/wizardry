@@ -32,7 +32,7 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 - [ ] From the watch face with Wizardry not running, raise and perform the configured gesture. No screen tap or four-twist wake is needed. Record gesture-to-ready latency and repeatability.
 - [ ] Repeat from a suspended Wizardry, an active/armed session, the Gesture guide, and Now Playing. Each invocation returns to the control screen and recalibrates once, without duplicate ready haptics or sensor streams.
 - [ ] Move continuously during launch: no mapped action occurs, and after ten seconds activation times out. Hold still after retrying: the ready haptic occurs only after calibration and the full configured armed window is available.
-- [ ] Repeat the launch-motion test with Require Wake disabled. Launch twists/shakes still cannot execute actions before readiness.
+- [ ] Repeat launch while deliberately twisting/shaking. No actions may execute before hold-still readiness, and twisting without explicit activation must never arm.
 - [ ] During calibration, lower the wrist, navigate to Now Playing, stop the session, change settings from iPhone, or interrupt motion delivery. Verify cancellation and that ordinary wrist raises never replay the old activation. Activate again to recover.
 - [ ] After readiness, test twist/tilt/shake, neutral return, cooldown, and armed expiry. Brief dimming retains only the unexpired arm window; manual controls and 30-minute session expiry still work.
 - [ ] With iPhone locked, verify actual Spotify/computer/Home action acknowledgement separately from the ready and recognition haptics. Record any target-specific background limitation.
@@ -43,10 +43,10 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 - [ ] Record watch model, watchOS version, Always On/Low Power settings, and Wrist Flick setting. Compare identical rolls with Wrist Flick on/off if available; distinguish screen dimming from returning to the watch face.
 - [ ] Arm, begin a roll, dim the screen, and complete the roll. Confirm one recognition and one target acknowledgement if fresh samples continue. Repeat with tilt and shake; record dropped gestures and actual sample rates rather than assuming watchOS delivers motion while inactive.
 - [ ] Raise/lower the wrist repeatedly during the armed window. Confirm countdown and neutral baseline do not reset, and no extra ready haptic occurs.
-- [ ] Stay inactive beyond armed expiry, then raise and move. No expired action or queued gesture should execute; a new wake/arm is needed when Require Wake is enabled.
+- [ ] Stay inactive beyond armed expiry, then raise and move. No expired action or queued gesture should execute; fresh shortcut/button activation is required.
 - [ ] Interrupt delivery partway through a roll or shake, then resume before expiry. The remaining armed time is retained, but no partial gesture completes across the interruption; return to neutral before a new action.
 - [ ] Press the Crown, switch apps, open Now Playing, stop, or change settings while armed/inactive. Confirm sensing stops and the old armed state cannot return.
-- [ ] Disable Require Wake: active gestures still work, but becoming inactive without an explicit arm window stops detection. Manual/Shortcut arming allows only its bounded window while inactive.
+- [ ] Without explicit arming, movement in either active or inactive scenes cannot act. Manual/Shortcut arming allows only its bounded window while inactive; live volume instead exits after inactivity or interruption.
 - [ ] Compare battery use during repeated armed/dimmed interactions with the previous build. No continuous screen-on or background-runtime capability is requested.
 
 ## Live graphs and failures

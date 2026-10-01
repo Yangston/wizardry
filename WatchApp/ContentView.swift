@@ -13,7 +13,7 @@ struct ContentView: View {
                         .font(.title).foregroundStyle(motion.armed ? .green : .purple)
                     Text(motion.configuration.selectedProfile.name).font(.headline)
                     Text(motion.status).font(.caption).multilineTextAlignment(.center)
-                    VolumeStatusView(remote:motion.volume) { motion.endVolume(lock:true) }
+                    VolumeStatusView(remote:motion.volume,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
                     if #available(watchOS 11.0, *) {
                         armButton.handGestureShortcut(.primaryAction)
                     } else { armButton }
@@ -81,6 +81,7 @@ struct ContentView: View {
 
 private struct VolumeStatusView: View {
     @ObservedObject var remote: LiveVolumeRemote
+    let tapStatus: String
     let lock: () -> Void
     var body: some View {
         if remote.state != .idle {
@@ -90,7 +91,10 @@ private struct VolumeStatusView: View {
                 if let actual = remote.acknowledged {
                     Text("\(remote.dryRun ? "Dry run" : "Acknowledged") \(Int((actual*100).rounded()))%").font(.caption2)
                 }
-                if remote.state == .adjusting { Button("Lock volume",action:lock).tint(.green) }
+                if remote.state == .adjusting {
+                    Text(tapStatus).font(.caption2)
+                    Button("Lock volume",action:lock).tint(.green)
+                }
             }.padding(6).background(.gray.opacity(0.15),in:RoundedRectangle(cornerRadius:8))
         }
     }

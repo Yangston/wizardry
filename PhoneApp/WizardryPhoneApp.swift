@@ -255,7 +255,7 @@ struct SetupView: View {
                     Label(link.status,systemImage:"applewatch")
                     Text("Wizardry uses your existing iPhone–Watch pairing. Install both apps, open Wizardry on each, then sync. No separate watch pairing code is needed.")
                     Button("Sync settings to watch") { store.saveConfiguration() }
-                    Text("For hands-free re-entry: start a session, keep Wizardry frontmost, and use Watch Settings → General → Return to Clock → After 1 hour. Raise your wrist, perform the wake sequence, then act. Double Tap also activates the Arm button on supported watches. If another app or the clock is showing, reopen Wizardry with Siri or the app launcher.")
+                    Text("For hands-free re-entry: raise your wrist and double-touch your fingers to run your AssistiveTouch Activate Wizardry shortcut. Hold still facing the watch for the ready haptic. Keep AssistiveTouch single touch at None. The Arm button also works; there is no separate wake sequence.")
                         .font(.caption)
                 }
                 Section("2 · Computer receiver") {

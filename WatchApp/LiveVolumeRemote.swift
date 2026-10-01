@@ -32,6 +32,8 @@ final class LiveVolumeRemote: ObservableObject {
         requested = nil; acknowledged = nil; sentTarget = nil; closing = false; dryRun = false
         state = .beginning; message = "Reading computer volume…"
         transmit(.begin)
+        // An unreachable paired phone can fail synchronously in sendVolume.
+        guard ownsMotion else { return }
         loop?.cancel()
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -82,7 +84,7 @@ final class LiveVolumeRemote: ObservableObject {
             case .begin:
                 self.requested = value
                 if !self.closing {
-                    self.state = .adjusting; self.message = "Raise / lower · single tap to lock"
+                    self.state = .adjusting; self.message = "Raise / lower · lock when ready"
                     self.didBegin?()
                 }
             case .update: break
