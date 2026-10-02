@@ -17,7 +17,7 @@ assert len(watches) == 1, f"Expected Watch/*.app inside container, found {watche
 with (watches[0] / "Info.plist").open("rb") as source:
     watch = plistlib.load(source)
 assert watch.get("WKApplication") and not watch.get("WKWatchOnly"), "Expected a companion watch app"
-assert watch.get("WKBackgroundModes") == ["self-care"], "Missing experimental interaction runtime capability"
+assert not watch.get("WKBackgroundModes"), "Autorotation experiment must not request background runtime"
 assert watch.get("WKCompanionAppBundleIdentifier") == container["CFBundleIdentifier"], "Watch companion ID mismatch"
 assert (watches[0] / watch["CFBundleExecutable"]).is_file(), "Missing watch executable"
 assert watch["CFBundleIdentifier"].startswith(container["CFBundleIdentifier"] + ".")

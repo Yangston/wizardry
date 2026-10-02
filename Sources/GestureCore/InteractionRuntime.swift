@@ -1,7 +1,7 @@
 import Foundation
 
-/// The platform adapter owns the OS session; this controller owns its bounded
-/// interaction lifetime. Late callbacks from a previous activation are ignored.
+/// The platform adapter enables an interaction aid (currently autorotation);
+/// this controller bounds its lifetime and ignores previous activation callbacks.
 @MainActor
 protocol InteractionRuntimeDriver: AnyObject {
     var didStart: (() -> Void)? { get set }
@@ -32,11 +32,11 @@ final class InteractionRuntime {
         stop()
         let now = clock()
         guard canStart, now.isFinite, requestedDeadline.isFinite, requestedDeadline > now else {
-            interrupted?("Runtime unavailable · activate again with the watch awake")
+            interrupted?("Raise your wrist · activate again")
             return false
         }
-        // Self-care sessions have a 10-minute OS limit. Never renew a session
-        // automatically, even if a live volume interaction keeps moving.
+        // Keep the existing ten-minute interaction cap so autorotation cannot
+        // remain enabled indefinitely during sustained volume movement.
         let limit = now + 10 * 60
         maximumDeadline = limit
         deadline = min(requestedDeadline, limit)
@@ -55,7 +55,7 @@ final class InteractionRuntime {
         return driver === next
     }
 
-    /// Volume takes over the same activation; it never starts another OS session.
+    /// Volume takes over the same activation without toggling the platform aid.
     /// Its own lock, inactivity and interruption checks end this lease early.
     @discardableResult
     func continueThroughVolume(until sessionDeadline: Double) -> Bool {
@@ -70,7 +70,7 @@ final class InteractionRuntime {
         let now = clock()
         guard !now.isFinite || now >= deadline else { return false }
         stop()
-        interrupted?("Interaction runtime expired · activate again")
+        interrupted?("Interaction ended · activate again")
         return true
     }
 

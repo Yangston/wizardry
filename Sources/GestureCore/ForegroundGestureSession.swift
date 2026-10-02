@@ -1,8 +1,8 @@
 import Foundation
 
 /// Allows a bounded, already-armed interaction to survive inactive foreground
-/// transitions. The Watch controller separately owns its bounded OS runtime;
-/// this state machine never extends an arm deadline or keeps the display on.
+/// transitions. The Watch controller separately owns temporary autorotation;
+/// this state machine never extends an arm deadline or requests background time.
 struct ForegroundGestureSession {
     enum Phase: Equatable { case active, inactive, background }
     var engine = GestureEngine()

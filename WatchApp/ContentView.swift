@@ -72,7 +72,7 @@ struct ContentView: View {
                 Text("For touch-free launch, create an iPhone Shortcut named Activate Wizardry using Start Wizardry session. Enable Show on Apple Watch in its details.")
                 Text("Your activation setup: AssistiveTouch double finger touch runs Activate Wizardry. Keep its single finger touch assigned to None.")
                 Text("Raise your wrist, double-touch your fingers to activate, and hold still looking at the Watch until the ready haptic. Then extend for volume, or make a mapped wrist action.")
-                Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. After readiness, Wizardry requests time to keep sensing while the screen sleeps. Leaving Wizardry disarms it.")
+                Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. While armed, the screen can flip when you turn your wrist away. Leaving Wizardry disarms it.")
                 Text("Live volume · experimental").font(.headline)
                 Text("Look at the Watch while holding still for the ready haptic. Extend your arm until z / yaw changes about 90° from that pose. Hold briefly for the entry haptic, then raise or lower vertically in short strokes with pauses. One learned single finger tap locks volume. Lock volume works before enrollment.")
                 Text("Volume stops after five seconds without movement, returning to the viewing pose, or interrupted sensing. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
@@ -83,7 +83,7 @@ struct ContentView: View {
                 ForEach(motion.configuration.selectedProfile.bindings.filter(\.enabled)) { binding in
                     Text("\(binding.gesture.title) → \(binding.summary)")
                 }
-                Text("Dimming keeps only the time left in your armed window. Live volume keeps sensing until adjustment ends. The screen may still go black. If the watch ends the interaction, activate again. Watch settings → Gestures → Wrist Flick → Off may help prevent accidental dismissal.")
+                Text("Turning your wrist does not restart the armed countdown. Live volume keeps the wrist-flip display behavior until adjustment ends. Lock, stop, or expiry restores ordinary display behavior. If sensing stops, activate again. Watch settings → Gestures → Wrist Flick → Off may help prevent accidental dismissal.")
             }.font(.caption).padding()
         }.navigationTitle("How to wave")
     }

@@ -26,7 +26,7 @@ final class MotionController: ObservableObject {
     @Published private(set) var actionFailed = false
     let link = WatchLink()
     private let manager = CMMotionManager()
-    private let interactionRuntime = InteractionRuntime(makeDriver: { WatchInteractionRuntime() })
+    private let interactionRuntime = InteractionRuntime(makeDriver: { WatchInteractionAutorotation() })
     lazy var volume = LiveVolumeRemote(link:link)
     @Published private(set) var enrollment = TapEnrollment()
     @Published private(set) var enrollmentRecording = false
@@ -220,7 +220,7 @@ final class MotionController: ObservableObject {
             if !activation.isPending { cancelShortcutActivation() }
             if canContinue && running {
                 // Keep the same subscription, baseline, and deadline while inactive.
-                // The bounded runtime requests execution while the screen sleeps.
+                // Autorotation remains enabled only for this bounded interaction.
                 // Every sample is still checked for age and ordering.
                 updateArmDisplay(at:now)
             } else {
@@ -376,8 +376,8 @@ final class MotionController: ObservableObject {
                 gestures.calibrateAndArm(roll:motion.roll,pitch:motion.pitch,sampleTime:time,readyTime:now)
                 arbiter.calibrate(yaw:motion.yaw); viewingAngles = (motion.roll,motion.pitch)
                 capture?.reset(model:tapModel)
-                // Request runtime only after calibration has established a ready,
-                // explicitly armed window. A new activation owns a fresh session.
+                // Enable autorotation after calibration, before the ready haptic.
+                // A new activation owns a fresh, bounded interaction window.
                 guard interactionRuntime.start(until:gestures.engine.armedUntil,
                                                canStart:gestures.phase == .active) else { return }
                 scheduleArmExpiry(); armed = true; status = "Ready - extend arm or make a gesture"
@@ -417,8 +417,8 @@ final class MotionController: ObservableObject {
                 if route == .enterVolume, !volume.ownsMotion {
                     volumeClaimed = true; armExpiryTask?.cancel(); armed = false; armRemaining = 0
                     gestures.reset(); tapFrozen = false; viewingSince = nil
-                    // Keep the same runtime through this live interaction, bounded
-                    // by the outer session and the OS self-care time limit.
+                    // Keep autorotation through this live interaction, bounded
+                    // by the outer session and a ten-minute interaction limit.
                     guard interactionRuntime.continueThroughVolume(
                         until:now + end.timeIntervalSinceNow) else { return }
                     volume.begin(revision:configuration.revision,phone:configuration.selectedProfileID == "phone")

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 
-class InteractionRuntimeArchiveTests(unittest.TestCase):
+class AutorotationArchiveTests(unittest.TestCase):
     def check_archive(self, modes):
         # Validate the built-plist gate using a minimal paired archive fixture;
         # this does not substitute for compiling or running the native app.
@@ -43,16 +43,18 @@ class InteractionRuntimeArchiveTests(unittest.TestCase):
                 capture_output=True, text=True, check=False,
             )
 
-    def test_paired_archive_with_interaction_runtime_passes(self):
-        result = self.check_archive(['self-care'])
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_paired_archive_without_runtime_capability_passes(self):
+        for modes in [None, []]:
+            with self.subTest(modes=modes):
+                result = self.check_archive(modes)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_missing_or_wrong_runtime_declaration_fails(self):
-        for modes in [None, [], ['mindfulness']]:
+    def test_previous_runtime_experiment_cannot_ship_in_autorotation_build(self):
+        for modes in [['self-care'], ['mindfulness']]:
             with self.subTest(modes=modes):
                 result = self.check_archive(modes)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Missing experimental interaction runtime capability', result.stderr)
+                self.assertIn('Autorotation experiment must not request background runtime', result.stderr)
 
 
 if __name__ == '__main__':
