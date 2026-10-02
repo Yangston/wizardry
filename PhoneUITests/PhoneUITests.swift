@@ -1,6 +1,24 @@
 ﻿import XCTest
 
 final class PhoneUITests: XCTestCase {
+    func testPhoneProfileExposesNativeLiveVolumeWithoutReplacingTwistShortcuts() {
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.navigationBars["Wizardry"].waitForExistence(timeout:15))
+        app.segmentedControls.buttons["Phone"].tap()
+        XCTAssertTrue(app.staticTexts["Live iPhone volume · experimental"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"phone-volume-slider").firstMatch.exists)
+        capture("06-phone-live-volume")
+        app.tabBars.buttons["Live"].tap()
+        XCTAssertTrue(app.staticTexts["Live iPhone volume · experimental"].waitForExistence(timeout:5))
+        capture("07-phone-live-motion")
+        app.tabBars.buttons["Motions"].tap()
+        app.segmentedControls.buttons["Phone"].tap()
+        app.staticTexts["Twist +"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["Exact Shortcut name"].waitForExistence(timeout:5))
+        XCTAssertEqual(app.textFields["Exact Shortcut name"].value as? String,"Wizardry Volume Up")
+        app.tabBars.buttons["Control"].tap()
+        app.segmentedControls.buttons["Computer"].tap()
+    }
     func testCompanionScreensAndMappingEditor() {
         let app = XCUIApplication()
         app.launch()

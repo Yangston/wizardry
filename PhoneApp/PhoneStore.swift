@@ -19,6 +19,7 @@ final class PhoneStore: ObservableObject {
     let link = WatchLink()
     let home = HomeController()
     let spotify = SpotifyController()
+    let phoneVolume = PhoneVolumeController()
     private var gate = CommandGate()
     private var volumeGate = VolumeCommandGate()
     private var volumeBusy = false
@@ -68,12 +69,21 @@ final class PhoneStore: ObservableObject {
                 reply(.failure("Expired, busy, or invalid volume session",request:request)); return
             }
             self.volumeBusy = true
+            let phone = self.configuration.selectedProfileID == "phone"
             Task {
-                let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
-                let result = await self.network.volume(request,endpoint:UserDefaults.standard.string(forKey:"serverURL") ?? "",token:PairingKeychain.load())
+                let task: UIBackgroundTaskIdentifier = phone ? .invalid : UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
+                let result: VolumeReply
+                if request.revision != self.configuration.revision {
+                    result = .failure("Settings changed. Activate again.",request:request)
+                } else if phone {
+                    result = await self.phoneVolume.volume(request)
+                } else {
+                    result = await self.network.volume(request,endpoint:UserDefaults.standard.string(forKey:"serverURL") ?? "",token:PairingKeychain.load())
+                }
                 self.lastVolumeReply = result
+                if result.outcome == .failed { self.volumeGate.invalidate(now:Date().timeIntervalSince1970) }
                 if request.operation == .end || result.outcome == .failed {
-                    self.history.insert(.init(title:"Live computer volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
+                    self.history.insert(.init(title:phone ? "Live iPhone volume" : "Live computer volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
                     if self.history.count > 30 { self.history.removeLast() }
                 }
                 self.volumeBusy = false
@@ -84,6 +94,7 @@ final class PhoneStore: ObservableObject {
     }
     func saveConfiguration() {
         guard configuration.isValid else { return }
+        phoneVolume.stop(); volumeGate.invalidate(now:Date().timeIntervalSince1970)
         configuration.revision = UUID().uuidString
         if let data = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(data,forKey:"wizardryConfiguration") }
         link.sync(configuration)
@@ -109,8 +120,12 @@ final class PhoneStore: ObservableObject {
     }
     func test(_ binding: GestureBinding) { Task { _ = await perform(binding,deadline:Date().timeIntervalSince1970+5) } }
     func clearFrames() { frames = []; lastTelemetry = .distantPast }
+    func suspendPhoneVolume() {
+        phoneVolume.stop()
+        if configuration.selectedProfileID == "phone" { volumeGate.invalidate(now:Date().timeIntervalSince1970) }
+    }
     private func perform(_ binding: GestureBinding, deadline: Double) async -> ActionResult {
-        guard !busy, !volumeBusy, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
+        guard !busy, !volumeBusy, !phoneVolume.isActive, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
         busy = true; defer { busy = false }
         let result: ActionResult
         if let command = binding.action.computerCommand {

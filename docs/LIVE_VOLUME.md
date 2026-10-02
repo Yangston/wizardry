@@ -1,4 +1,4 @@
-# Experimental live computer volume
+# Experimental live computer and iPhone volume
 
 The intended flow is **wake watch → double finger touch → ready haptic while looking at the watch → extend arm → raise/lower hand → one single finger touch to lock**.
 
@@ -12,7 +12,29 @@ The double touch uses the user's existing AssistiveTouch **Activate Wizardry** S
 4. Use **Lock volume** before enrolling your tap. After enrollment, a single thumb-index touch locks. The detector waits 450 ms from its candidate onset for a possible second touch. Classification can add latency if a second candidate is still being evaluated.
 5. **Locking** means the final request is pending. **Locked** means the receiver acknowledged the final value and closed the session. Requested and acknowledged percentages, yaw change, mode and tap status appear on the Watch and on iPhone Control / Live; dry-run acknowledgement is not audio execution.
 
-Volume ends after five seconds without meaningful movement, returning to within 25 degrees of the viewing yaw for 250 ms, session expiry, settings changes, leaving the app, or interrupted sensing. Activate again before another adjustment. Brief inactive foreground periods may continue only while fresh samples arrive. No additional background runtime is requested.
+Volume ends after five seconds without meaningful movement, returning to within 25 degrees of the viewing yaw for 250 ms, session expiry, settings changes, leaving the app, or interrupted sensing. Activate again before another adjustment. Brief inactive foreground periods may continue only while fresh samples arrive. The experimental build requests extended runtime after calibration and retains the same session through live adjustment until lock/stop/failure. It is capped at ten minutes from the original request and the outer session's remaining duration; OS denial, expiry, or cancellation pauses sensing without automatically renewing runtime. The screen can still turn off. Apple's self-care category is used experimentally; physical-watch results and App Store suitability are not established.
+
+## Live iPhone volume (experimental)
+
+1. Install both updated apps. On iPhone Control, select **Phone** and sync settings to the Watch. Keep Wizardry foreground with the native volume slider visible on Control, Live, or Setup. Computer pairing, Spotify authorization, and volume Shortcuts are not required for this path.
+2. Use the same wrist wake → AssistiveTouch double finger touch → hold still → ready haptic → approximately ±90° relative yaw → entry haptic flow. Begin reads the current iPhone media-output volume without changing it.
+3. Raise/lower in short vertical strokes to change media volume immediately. The phone uses public `UISlider` value/control events on the native `MPVolumeView` slider, then reads `AVAudioSession.outputVolume`. Requested and acknowledged levels remain separate. Acknowledgements require readback within one percentage point of the request; setting the visible slider alone is not success.
+4. A learned single finger touch or **Lock volume** sends the final level and closes the session after readback. Five seconds without movement, returning to the ready yaw, and Watch interruptions end adjustment as with Computer. The current applied level stays in place.
+5. The iPhone stops on leaving/inactivating Wizardry, unavailable/offscreen native slider, output-route changes, failed readback, invalid ordering, or request expiry. Idle sessions close after six seconds. Each write happens once, with up to 400 ms to observe readback inside the original one-second deadline; failures are never retried or queued. There is no extra phone background task, workout, or silent audio. A mixing ambient audio session is active only to read volume during the session.
+
+**Platform boundary:** Apple does not document a system-volume setter. This bridge depends on the native volume view containing an enabled public slider and responding to its control events; those implementation details can change. No private class names or selectors are used. Real-device output-volume control, readback timing, routing, and compatibility are **unverified** until tested on the user's iPhone. The Simulator cannot change system volume and returns an explicit error. This controls media volume, not ringer/alert volume, and does not support a locked/background iPhone. Native slider touch and Watch Now Playing remain available.
+
+The existing Phone twist mappings are preserved: they still launch the named Volume Up/Down Shortcuts. Arm extension has priority over those mappings; they stay suppressed until fresh activation after volume control.
+
+### iPhone acceptance checks (pending physical testing)
+
+- [ ] Record iPhone model/iOS, Watch model/watchOS, wrist orientation, output route, and actual delivered rates.
+- [ ] Start media at several known levels. Begin must match the current level without changing it; raising/lowering must audibly change volume during movement before lock.
+- [ ] Compare the system volume indicator with requested and acknowledged values. Acknowledged values must be audio-session readback, including at 0% and 100%. Measure median and worst-case movement-to-applied-volume latency; do not infer twenty applied updates per second from synthetic tests.
+- [ ] Lock with the button and personalized single touch. Verify the final system volume holds, and discrete gestures remain suppressed until fresh activation.
+- [ ] Lock the iPhone, switch phone apps, scroll the slider offscreen, disconnect the Watch, or change speaker/headphone/AirPlay routes mid-adjustment. No later update may replay; activate again to recover.
+- [ ] Verify actual music remains playing when Wizardry starts/stops its mixing audio session. Check speaker and headphones separately; treat AirPlay as unverified until tested.
+- [ ] Confirm Computer volume and all existing twist/tilt/shake mappings still work in their selected profiles.
 
 ## Learn the single touch
 

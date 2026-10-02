@@ -165,4 +165,49 @@ final class VolumeInteractionTests: XCTestCase {
         for i in 0...100 { XCTAssertNil(engine.update(roll:i.isMultiple(of:2) ? 1 : -1,pitch:0,acceleration:1.5,time:Double(i)*0.02)) }
         XCTAssertFalse(engine.isArmed)
     }
+    func testPhoneVolumeUsesTheSameOrderedExpiringSessionAndCannotCrossProfiles() {
+        var configuration = WizardryConfiguration(); configuration.selectedProfileID = "phone"
+        XCTAssertTrue(configuration.supportsLiveVolume)
+        var gate = VolumeCommandGate()
+        var request = VolumeRequest(sessionID:UUID(),revision:configuration.revision,sequence:0,createdAt:100,operation:.begin)
+        XCTAssertTrue(gate.accept(request,configuration:configuration,now:100))
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:100))
+        request.id = UUID(); request.sequence = 1; request.operation = .update; request.target = 0.6
+        XCTAssertTrue(gate.accept(request,configuration:configuration,now:100.1))
+        configuration.selectedProfileID = "computer"
+        request.id = UUID(); request.sequence = 2
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:100.2))
+        configuration.selectedProfileID = "phone"
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:101.1))
+        request.createdAt = 101.2; request.operation = .end
+        XCTAssertTrue(gate.accept(request,configuration:configuration,now:101.2))
+        request.id = UUID(); request.operation = .begin; request.sequence = 0; request.target = nil
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:101.3))
+        request.sessionID = UUID(); configuration.selectedProfileID = "home"
+        XCTAssertFalse(configuration.supportsLiveVolume)
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:101.3))
+    }
+    func testInterruptedPhoneSessionRequiresFreshActivationAndID() {
+        var configuration = WizardryConfiguration(); configuration.selectedProfileID = "phone"
+        var gate = VolumeCommandGate()
+        var request = VolumeRequest(sessionID:UUID(),revision:configuration.revision,sequence:0,createdAt:100,operation:.begin)
+        XCTAssertTrue(gate.accept(request,configuration:configuration,now:100))
+        gate.invalidate(now:100.1)
+        request.id = UUID(); request.sequence = 1; request.operation = .update; request.target = 0.6
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:100.2))
+        request.id = UUID(); request.sequence = 0; request.operation = .begin; request.target = nil
+        XCTAssertFalse(gate.accept(request,configuration:configuration,now:100.2))
+        request.sessionID = UUID()
+        XCTAssertTrue(gate.accept(request,configuration:configuration,now:100.2))
+    }
+    func testVolumeReadbackMustConfirmRequestedLevelRatherThanSliderValue() {
+        XCTAssertTrue(VolumeReadback.confirms(actual:0.604,target:0.6))
+        XCTAssertFalse(VolumeReadback.confirms(actual:0.5,target:0.6))
+        XCTAssertTrue(VolumeReadback.confirms(actual:0,target:0))
+        XCTAssertTrue(VolumeReadback.confirms(actual:1,target:1))
+        XCTAssertFalse(VolumeReadback.confirms(actual:.nan,target:0.6))
+        XCTAssertFalse(VolumeReadback.confirms(actual:0.6,target:.infinity))
+        XCTAssertFalse(VolumeReadback.confirms(actual:1.01,target:1))
+        XCTAssertFalse(VolumeReadback.confirms(actual:0,target:-0.01))
+    }
 }

@@ -33,6 +33,8 @@ targets:
         WKApplication: true
         WKCompanionAppBundleIdentifier: $(WIZARDRY_BUNDLE_ID)
         WKRunsIndependentlyOfCompanionApp: false
+        # Experimental short frontmost runtime; not a general remote-control category.
+        WKBackgroundModes: [self-care]
         NSMotionUsageDescription: Wizardry uses wrist motion to recognize deliberate control gestures.
         NSLocalNetworkUsageDescription: Wizardry sends commands to your computer on your local network.
         NSAppTransportSecurity:

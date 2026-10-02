@@ -111,6 +111,7 @@ struct WizardryConfiguration: Codable, Equatable {
             .init(gesture: .shake, action: .lightToggle)])
     ]
     var selectedProfile: ControlProfile { profiles.first { $0.id == selectedProfileID } ?? profiles[0] }
+    var supportsLiveVolume: Bool { ["computer", "phone"].contains(selectedProfileID) }
     var isValid: Bool {
         schema == 1 && !profiles.isEmpty && profiles.count <= 10 &&
         profiles.contains { $0.id == selectedProfileID } &&
@@ -163,7 +164,7 @@ struct WatchControlSnapshot: Codable, Equatable {
             case .calibrating: return "Hold still facing Watch"
             case .armed: return "Ready to extend"
             case .extending: return "Extending arm"
-            case .volumeStarting: return "Reading computer volume"
+            case .volumeStarting: return "Reading current volume"
             case .adjustingVolume: return "Adjusting volume"
             case .lockingVolume: return "Locking volume"
             case .locked: return "Volume locked"

@@ -88,7 +88,7 @@ struct WatchControlCard: View {
                     .font(.title3.bold()).accessibilityIdentifier("watch-control-status")
                 if let snapshot {
                     Text("Watch profile: \(snapshot.profileID.capitalized)").font(.caption).foregroundStyle(.secondary)
-                    if snapshot.profileID == "computer" {
+                    if ["computer","phone"].contains(snapshot.profileID) {
                         yawReadout(snapshot)
                         if let frame { Text(String(format:"Raw sensor yaw %+.0f°",frame.yaw*180 / .pi)).font(.caption2).foregroundStyle(.secondary) }
                     }
@@ -117,7 +117,7 @@ struct WatchControlCard: View {
                     if !fresh { Text("Values above are last received readings, not live.").font(.caption).foregroundStyle(.orange) }
                 }
                 if let reply = store.lastVolumeReply, reply.outcome == .failed {
-                    Text("Receiver: "+reply.message).font(.caption).foregroundStyle(.orange)
+                    Text("Volume: "+reply.message).font(.caption).foregroundStyle(.orange)
                 }
             }.padding(18).background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:20))
         }
@@ -144,20 +144,21 @@ struct WatchControlCard: View {
 }
 
 struct VolumeFlowGuide: View {
-    var computer = true
+    var profileID = "computer"
+    private var volume: Bool { ["computer","phone"].contains(profileID) }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Label(computer ? "Activate · Extend · Adjust · Lock" : "Activate · Act",systemImage:"sparkles").font(.headline)
+            Label(volume ? "Activate · Extend · Adjust · Lock" : "Activate · Act",systemImage:"sparkles").font(.headline)
             step("1", "Activate", "Wake the Watch and double-touch your fingers to run Activate Wizardry. Hold still looking at it for the ready haptic. Arm on the Watch also works.")
-            if computer {
+            if volume {
                 step("2", "Extend", "Extend your arm so z / yaw changes about 90° from the ready pose. Hold briefly until the volume-entry haptic.")
-                step("3", "Adjust live", "Raise your hand to increase computer volume; lower it to decrease. Use short vertical strokes with pauses. Start at the computer's current volume.")
+                step("3", "Adjust live", profileID == "phone" ? "Keep Wizardry's native volume slider visible on iPhone. Raise/lower in short vertical strokes to change media volume live, starting at its current level. The native-slider bridge is experimental." : "Raise your hand to increase computer volume; lower it to decrease. Use short vertical strokes with pauses. Start at the computer's current volume.")
                 step("4", "Lock", "Touch thumb and index finger together once after enrollment, or press Lock volume on the Watch. Wait for the locked acknowledgement.")
                 Text("Volume stops after five seconds without movement, returning to the viewing yaw, or interrupted sensing. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 step("2", "Make your wrist action", "Use the selected profile's twist, tilt or shake mapping within the armed window. Return to neutral between actions.")
-                Text("Choose Computer to use live arm-height volume control.").font(.caption).foregroundStyle(.secondary)
+                Text("Choose Computer or Phone to use live arm-height volume control.").font(.caption).foregroundStyle(.secondary)
             }
         }.padding(18).background(.purple.opacity(0.1),in:RoundedRectangle(cornerRadius:20))
     }

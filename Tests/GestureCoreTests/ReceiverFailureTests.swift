@@ -7,7 +7,9 @@ final class ReceiverFailureTests: XCTestCase {
         let missing = ReceiverFailure.message(status:404,data:Data("{\"error\":\"Not found\"}".utf8),token:token)
         XCTAssertTrue(missing.contains("HTTP 404")); XCTAssertTrue(missing.contains("updated receiver/server.py"))
         let denied = ReceiverFailure.message(status:401,data:Data("{\"error\":\"Unauthorized\"}".utf8),token:token)
-        XCTAssertTrue(denied.contains("HTTP 401")); XCTAssertTrue(denied.contains("pairing token"))
+        XCTAssertTrue(denied.contains("HTTP 401"))
+        XCTAssertTrue(denied.contains("token printed by the running receiver"))
+        XCTAssertTrue(denied.contains("--token-file keeps pairing across restarts"))
     }
     func testActualSessionAndClockReasonsSurvive() {
         let session = ReceiverFailure.message(status:409,data:Data("{\"error\":\"Unknown session or older sequence\"}".utf8),token:token)

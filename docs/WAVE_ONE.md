@@ -9,7 +9,8 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 - [ ] Configure the receiver with a new session token. Verify dry-run acknowledgement before `--execute`.
 - [ ] Grant Apple Home access; choose the intended plug for on/off/toggle and a scene for tilt up.
 - [ ] Connect Spotify from Setup and start a song in Spotify. Verify play/pause, next, previous. Record the active device and any account/device restrictions.
-- [ ] Verify phone volume slider. If using volume gestures, create both named Shortcuts and keep Wizardry foreground; confirm the handoff behavior.
+- [ ] Verify phone volume slider. For live volume, select Phone, keep the native slider visible, and test Watch extension/raise-lower/lock with real media-volume readback. Check speaker and headphones independently. See [iPhone acceptance checks](LIVE_VOLUME.md#live-iphone-volume-experimental).
+- [ ] If using the existing discrete volume twist mappings, create both named Shortcuts and keep Wizardry foreground; confirm the handoff behavior.
 
 ## Watch controls
 
@@ -47,7 +48,11 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 - [ ] Interrupt delivery partway through a roll or shake, then resume before expiry. The remaining armed time is retained, but no partial gesture completes across the interruption; return to neutral before a new action.
 - [ ] Press the Crown, switch apps, open Now Playing, stop, or change settings while armed/inactive. Confirm sensing stops and the old armed state cannot return.
 - [ ] Without explicit arming, movement in either active or inactive scenes cannot act. Manual/Shortcut arming allows only its bounded window while inactive; live volume instead exits after inactivity or interruption.
-- [ ] Compare battery use during repeated armed/dimmed interactions with the previous build. No continuous screen-on or background-runtime capability is requested.
+- [ ] In the device console, filter category `InteractionRuntime`. Verify one runtime request after hold-still calibration, a start event, and an end at armed expiry. Idle screens, calibration, and enrollment must not request runtime. Repeat activation; old-session callbacks must not pause the new interaction.
+- [ ] On Series 12/watchOS 27.0, turn sideways and palm-up after readiness. Verify fresh sensor delivery and actual actions while the screen is black; record delivery gaps and latency, not just display behavior. Repeat without an attached debugger.
+- [ ] Enter live volume near armed expiry. Runtime continues through adjustment without a new request; lock, five-second inactivity, sensing interruption, transport failure, navigation away, and settings changes all end it. Verify its ten-minute/outer-session cap without automatic renewal.
+- [ ] Exercise runtime denial, OS invalidation, and will-expire handling where possible. Sensing pauses, no delayed command executes, and a wrist raise cannot restart runtime. Record the OS invalidation reason from the console.
+- [ ] Compare battery use during repeated armed/dimmed interactions with the previous build. Extended runtime is declared experimentally with the self-care category; the screen is not forced on and no artificial workout or silent audio is used.
 
 ## Live graphs and failures
 

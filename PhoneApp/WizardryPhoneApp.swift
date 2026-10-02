@@ -32,6 +32,9 @@ struct PhoneRootView: View {
             }
         }
         .onDisappear { store.link.stopStream() }
+        .onChange(of:scenePhase) { _,phase in
+            if phase != .active { store.suspendPhoneVolume() }
+        }
         .onReceive(store.link.$reachable.removeDuplicates()) { reachable in
             if reachable && streamsMotion { store.link.requestStream() }
         }
@@ -56,6 +59,7 @@ struct ControlDashboard: View {
                     Picker("Control profile",selection:$store.configuration.selectedProfileID) {
                         ForEach(store.configuration.profiles) { Text($0.name).tag($0.id) }
                     }.pickerStyle(.segmented).onChange(of:store.configuration.selectedProfileID) { _,_ in store.saveConfiguration() }
+                    if store.configuration.selectedProfileID == "phone" { PhoneVolumeCard(store:store) }
                     MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
                     DisclosureGroup("All motion axes") {
@@ -66,7 +70,7 @@ struct ControlDashboard: View {
                             SensorChart(title:"Gravity",unit:"g",frames:store.frames,keys:[\.gx,\.gy,\.gz])
                         }.padding(.top,12)
                     }
-                    VolumeFlowGuide(computer:store.configuration.selectedProfileID == "computer")
+                    VolumeFlowGuide(profileID:store.configuration.selectedProfileID)
                     NavigationLink { FingerTapSetupGuide() } label: { Label("Single finger tap setup",systemImage:"hand.pinch") }
                     Text("Test discrete actions").font(.title2.bold())
                     Text("These buttons run your mappings now. Home actions need a selected device or scene.").font(.caption).foregroundStyle(.secondary)
@@ -131,10 +135,13 @@ struct MotionMappings: View {
                         }
                     }
                 }
-                if editProfile == "computer" {
-                    Section("Live computer volume") {
+                if ["computer","phone"].contains(editProfile) {
+                    Section(editProfile == "phone" ? "Live iPhone volume · experimental" : "Live computer volume") {
                         Text("Extend your arm so z / yaw changes about 90° from the ready pose. After the entry haptic, raise/lower vertically in short strokes with pauses. A learned single finger touch or Lock volume ends adjustment.").font(.caption)
                         Text("Extension takes priority over the discrete mappings above. While adjusting volume, other wrist actions are paused.").font(.caption).foregroundStyle(.secondary)
+                        if editProfile == "phone" {
+                            Text("Keep Wizardry open on iPhone with its native volume slider visible. Raises/lowers change media volume immediately; no Shortcut is used. Physical-device testing is required.").font(.caption)
+                        }
                         NavigationLink("Single finger tap setup") { FingerTapSetupGuide() }
                     }
                 }
@@ -218,6 +225,7 @@ struct LiveMotionView: View {
                             if let sample = store.frames.last { Text("Watch: \(sample.state)").font(.caption) }
                         }
                     }
+                    if store.configuration.selectedProfileID == "phone" { PhoneVolumeCard(store:store) }
                     MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
                     SensorChart(title:"User acceleration",unit:"g",frames:store.frames,keys:[\.ax,\.ay,\.az])
@@ -310,8 +318,10 @@ struct SetupView: View {
                     Text("Start Spotify on the phone or Connect device you want to control. Commands target the active player. Phone profile uses Spotify for play/pause and tracks. Remote volume depends on the player's supported controls.").font(.caption)
                 }
                 Section("Phone volume") {
-                    NativeVolumeSlider().frame(height:40)
-                    Text("Native media volume works with Spotify. Gesture volume on iPhone uses two user-created Shortcuts while Wizardry is open. Create Wizardry Volume Up / Wizardry Volume Down: Get Device Details → Current Volume, Calculate ±0.06, then Set Volume. The watch's Now Playing screen also provides native playback and Digital Crown volume.").font(.caption)
+                    NativeVolumeSlider(controller:store.phoneVolume).frame(height:40)
+                    Text("Select Phone on Control. Keep Wizardry open on iPhone with this slider visible, activate on the Watch, extend to about 90° yaw change, then raise/lower to change media volume live. A learned single touch or Lock volume ends adjustment. No volume Shortcut is needed for this experimental native-slider bridge.").font(.caption)
+                    Text("Use Control or Live to watch requested and confirmed volume. iOS does not document a system-volume setter; this bridge needs testing on your physical iPhone and audio output. Leaving Wizardry or changing output stops the session. It does not control ringer volume.").font(.caption).foregroundStyle(.secondary)
+                    Text("Existing twist mappings still use Wizardry Volume Up / Wizardry Volume Down Shortcuts: Get Device Details → Current Volume, Calculate ±0.06, then Set Volume. Watch Now Playing also provides Digital Crown volume.").font(.caption)
                 }
                 Section("Optional · Apple Music") {
                     Button("Allow Apple Music control") {
@@ -329,7 +339,24 @@ struct SetupView: View {
     }
 }
 
+@MainActor
 struct NativeVolumeSlider: UIViewRepresentable {
-    func makeUIView(context: Context) -> MPVolumeView { MPVolumeView(frame:.zero) }
-    func updateUIView(_ uiView: MPVolumeView,context:Context) {}
+    let controller: PhoneVolumeController
+    func makeUIView(context: Context) -> PhoneVolumeView {
+        let view = PhoneVolumeView(frame:.zero); view.controller = controller
+        return view
+    }
+    func updateUIView(_ uiView: PhoneVolumeView,context:Context) {}
+}
+
+struct PhoneVolumeCard: View {
+    @ObservedObject var store: PhoneStore
+    var body: some View {
+        VStack(alignment:.leading,spacing:10) {
+            Label("Live iPhone volume · experimental",systemImage:"speaker.wave.2").font(.headline)
+            NativeVolumeSlider(controller:store.phoneVolume).frame(height:40).accessibilityIdentifier("phone-volume-slider")
+            Text("Keep this slider visible. Extend after the ready haptic, then raise/lower to change media volume live. Single touch or Lock volume finishes. No Shortcut needed.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(18).background(.purple.opacity(0.1),in:RoundedRectangle(cornerRadius:20))
+    }
 }

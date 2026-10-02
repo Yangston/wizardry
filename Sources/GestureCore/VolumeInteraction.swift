@@ -160,6 +160,7 @@ struct VolumeReply: Codable {
 /// errors are never retried. One active session and no reopening closed IDs.
 struct VolumeCommandGate {
     private var active: UUID?
+    private var activeProfile: String?
     private var sequence = -1
     private var closed: [UUID:Double] = [:]
     private var seen: [UUID:Double] = [:]
@@ -168,16 +169,30 @@ struct VolumeCommandGate {
         seen = seen.filter { now-$0.value < 30 }
         guard request.isValid, now.isFinite, request.createdAt <= now+0.1,
               now-request.createdAt <= 1, request.revision == configuration.revision,
-              configuration.selectedProfileID == "computer", seen[request.id] == nil,
+              configuration.supportsLiveVolume, seen[request.id] == nil,
               closed[request.sessionID] == nil else { return false }
         if request.operation == .begin {
             if let active { closed[active] = now }
-            active = request.sessionID; sequence = 0
+            active = request.sessionID; activeProfile = configuration.selectedProfileID; sequence = 0
         } else {
-            guard active == request.sessionID, request.sequence > sequence else { return false }
+            guard active == request.sessionID, activeProfile == configuration.selectedProfileID,
+                  request.sequence > sequence else { return false }
             sequence = request.sequence
             if request.operation == .end { closed[request.sessionID] = now; active = nil }
         }
         seen[request.id] = now; return true
+    }
+    mutating func invalidate(now: Double) {
+        if let active { closed[active] = now }
+        active = nil; activeProfile = nil
+    }
+}
+
+/// Readback acknowledges the actual system level, allowing small slider
+/// rounding differences. An unchanged or invalid reading cannot confirm a move.
+enum VolumeReadback {
+    static func confirms(actual: Double, target: Double) -> Bool {
+        actual.isFinite && target.isFinite && (0...1).contains(actual) &&
+        (0...1).contains(target) && abs(actual-target) <= 0.01
     }
 }

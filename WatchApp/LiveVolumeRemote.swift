@@ -28,12 +28,12 @@ final class LiveVolumeRemote: ObservableObject {
     private var timeout: Task<Void,Never>?
     var ownsMotion: Bool { [.beginning,.adjusting,.locking].contains(state) }
     init(link: WatchLink) { self.link = link }
-    func begin(revision: String) {
+    func begin(revision: String, phone: Bool = false) {
         guard !ownsMotion else { return }
         sessionID = UUID(); self.revision = revision; sequence = 0
         requested = nil; acknowledged = nil; latestTarget = nil; sentTarget = nil; closing = false; dryRun = false
         lastDisplay = -.infinity
-        state = .beginning; message = "Reading computer volume…"
+        state = .beginning; message = phone ? "Reading iPhone volume…" : "Reading computer volume…"
         transmit(.begin)
         // An unreachable paired phone can fail synchronously in sendVolume.
         guard ownsMotion else { return }

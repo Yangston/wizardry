@@ -26,6 +26,7 @@ final class MotionController: ObservableObject {
     @Published private(set) var actionFailed = false
     let link = WatchLink()
     private let manager = CMMotionManager()
+    private let interactionRuntime = InteractionRuntime(makeDriver: { WatchInteractionRuntime() })
     lazy var volume = LiveVolumeRemote(link:link)
     @Published private(set) var enrollment = TapEnrollment()
     @Published private(set) var enrollmentRecording = false
@@ -60,6 +61,9 @@ final class MotionController: ObservableObject {
     private var expiryTask: Task<Void,Never>?
 
     init() {
+        interactionRuntime.interrupted = { [weak self] message in
+            self?.pause(message)
+        }
         if let data = UserDefaults.standard.data(forKey:"watchConfiguration"),
            let saved = try? JSONDecoder().decode(WizardryConfiguration.self,from:data), saved.isValid { configuration = saved }
         link.configurationReceived = { [weak self] config in
@@ -87,6 +91,7 @@ final class MotionController: ObservableObject {
         }
         volume.didFinish = { [weak self] in
             guard let self, self.volumeClaimed else { return }
+            self.interactionRuntime.stop()
             self.gestures.reset(); self.armed = false; self.armRemaining = 0
             self.status = self.volume.message
             if self.volume.state == .locked { self.haptic(.success) }
@@ -94,6 +99,7 @@ final class MotionController: ObservableObject {
         configureEngine()
     }
     private func configureEngine() {
+        interactionRuntime.stop()
         armExpiryTask?.cancel(); armExpiryTask = nil
         if volume.ownsMotion { volume.finish(lock:false) }
         volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; viewingSince = nil; pendingMotion = []
@@ -115,6 +121,7 @@ final class MotionController: ObservableObject {
                 do { try await Task.sleep(for:.seconds(1)) } catch { return }
                 guard let self, let end = self.sessionEnd else { return }
                 if Date() >= end { self.stop("Session ended after 30 minutes"); return }
+                if self.interactionRuntime.expireIfNeeded() { continue }
                 let now = ProcessInfo.processInfo.systemUptime
                 if self.volume.ownsMotion && now-self.lastDelivery > 0.25 { self.endVolume(lock:false) }
                 if self.enrollmentRecording {
@@ -213,7 +220,8 @@ final class MotionController: ObservableObject {
             if !activation.isPending { cancelShortcutActivation() }
             if canContinue && running {
                 // Keep the same subscription, baseline, and deadline while inactive.
-                // watchOS may still suspend delivery; every sample is checked for age.
+                // The bounded runtime requests execution while the screen sleeps.
+                // Every sample is still checked for age and ordering.
                 updateArmDisplay(at:now)
             } else {
                 suspendCapture(activation.isPending ? "Opening control · hold still" : "Paused · raise wrist to resume")
@@ -223,6 +231,7 @@ final class MotionController: ObservableObject {
     func navigationChanged() {
         if navigationPath.last == .nowPlaying { pause("Paused for Now Playing") }
         else if navigationPath.last == .enrollment {
+            interactionRuntime.stop()
             cancelShortcutActivation(); endVolume(lock:false); gestures.reset(); armed = false
             if !sessionActive { start() } else { resume() }
         } else {
@@ -235,6 +244,7 @@ final class MotionController: ObservableObject {
         // is already frontmost, clear pending control input without throwing away
         // the recording or calibrating/arming a control interaction.
         if navigationPath.last == .enrollment, enrollmentRecording, running, gestures.phase == .active {
+            interactionRuntime.stop()
             cancelShortcutActivation(); gestures.reset(); armed = false; armRemaining = 0
             // Capture is training-only (no model). Preserve complete candidate
             // windows so both halves of a negative double touch are recorded.
@@ -270,6 +280,7 @@ final class MotionController: ObservableObject {
     }
     func endVolume(lock: Bool) {
         guard volumeClaimed else { return }
+        interactionRuntime.stop()
         volume.finish(lock:lock); gestures.reset(); armed = false; armRemaining = 0
         armExpiryTask?.cancel(); status = volume.message
     }
@@ -278,6 +289,7 @@ final class MotionController: ObservableObject {
         if enrollment.stage == .complete { enrollment = TapEnrollment() }
         if !sessionActive { start() }
         guard running else { return }
+        interactionRuntime.stop()
         endVolume(lock:false); gestures.reset(); armed = false
         enrollmentRecording = true
         enrollmentDeadline = ProcessInfo.processInfo.systemUptime+enrollment.stage.duration
@@ -314,6 +326,7 @@ final class MotionController: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             let now = ProcessInfo.processInfo.systemUptime
             self.gestures.expireArm(at:now)
+            self.interactionRuntime.stop()
             if self.gestures.phase == .inactive {
                 self.pause("Armed window ended · raise wrist to resume")
             } else {
@@ -323,6 +336,7 @@ final class MotionController: ObservableObject {
     }
     private func updateArmDisplay(at now: Double) {
         armed = gestures.engine.isArmed(at:now)
+        if !armed && !volume.ownsMotion { interactionRuntime.stop() }
         armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
         if volumeClaimed { status = volume.message }
         else if activation.isPending { status = "Hold still · preparing gestures" }
@@ -333,6 +347,7 @@ final class MotionController: ObservableObject {
     private func consume(_ motion: CapturedMotion) {
         let time = motion.time, now = ProcessInfo.processInfo.systemUptime
         guard let end = sessionEnd, Date() < end else { stop("Session expired - start again"); return }
+        if interactionRuntime.expireIfNeeded() { return }
         guard [time,motion.roll,motion.pitch,motion.yaw,now].allSatisfy(\.isFinite),
               motion.acceleration.isFinite, motion.rotation.isFinite, motion.gravity.isFinite,
               motion.attitude.normal != nil, time <= now, now-time <= 0.25,
@@ -361,6 +376,10 @@ final class MotionController: ObservableObject {
                 gestures.calibrateAndArm(roll:motion.roll,pitch:motion.pitch,sampleTime:time,readyTime:now)
                 arbiter.calibrate(yaw:motion.yaw); viewingAngles = (motion.roll,motion.pitch)
                 capture?.reset(model:tapModel)
+                // Request runtime only after calibration has established a ready,
+                // explicitly armed window. A new activation owns a fresh session.
+                guard interactionRuntime.start(until:gestures.engine.armedUntil,
+                                               canStart:gestures.phase == .active) else { return }
                 scheduleArmExpiry(); armed = true; status = "Ready - extend arm or make a gesture"
                 haptic(.success)
             case .timedOut: stop("Activation timed out - activate again"); return
@@ -391,14 +410,18 @@ final class MotionController: ObservableObject {
             gestures.expireArm(at:now)
             guard gestures.allowsMotion(at:now) else { pause("Activate again to resume"); return }
             var suppress = volume.ownsMotion
-            if configuration.selectedProfileID == "computer", gestures.engine.isArmed(at:now) {
+            if configuration.supportsLiveVolume, gestures.engine.isArmed(at:now) {
                 let route = arbiter.update(yaw:motion.yaw,acceleration:acceleration,rotation:rotation,time:time)
                 extending = route == .transition && abs(arbiter.relativeYaw) >= 25 * .pi/180
                 suppress = suppress || route != .legacy
                 if route == .enterVolume, !volume.ownsMotion {
                     volumeClaimed = true; armExpiryTask?.cancel(); armed = false; armRemaining = 0
                     gestures.reset(); tapFrozen = false; viewingSince = nil
-                    volume.begin(revision:configuration.revision)
+                    // Keep the same runtime through this live interaction, bounded
+                    // by the outer session and the OS self-care time limit.
+                    guard interactionRuntime.continueThroughVolume(
+                        until:now + end.timeIntervalSinceNow) else { return }
+                    volume.begin(revision:configuration.revision,phone:configuration.selectedProfileID == "phone")
                 }
             }
             if !volumeClaimed {
