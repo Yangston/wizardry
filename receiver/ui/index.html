@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Wizardry · Live display</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✦</span><div>Wizardry<span class="eyebrow">COMPUTER LIVE DISPLAY</span></div></div>
+      <div class="toolbar"><span id="connection" class="connection"><i></i><span id="connection-label">Connecting</span></span><button id="fullscreen" type="button">Full screen <span aria-hidden="true">⛶</span></button></div>
+    </header>
+    <div id="preview-banner" class="preview-banner" hidden>Preview animation · simulated visuals only · no commands sent</div>
+    <section class="intro"><div><p class="eyebrow">A LITTLE MAGIC, MADE VISIBLE</p><h1>Your hand. Your volume.</h1><p>Extend to begin. Raise or lower. Touch once to lock.</p></div><span id="mode" class="mode">Loading receiver</span></section>
+    <div class="main-grid">
+      <section class="panel volume-panel" aria-labelledby="volume-title">
+        <div class="panel-top"><h2 id="volume-title">Live volume</h2><span id="phase" class="phase" role="status">Waiting</span></div>
+        <div class="dial-wrap">
+          <svg class="dial" viewBox="0 0 280 280" aria-hidden="true"><defs><linearGradient id="dial-gradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#6e68ff"/><stop offset="100%" stop-color="#cab8ff"/></linearGradient></defs><circle class="dial-track" cx="140" cy="140" r="117"/><circle id="dial-fill" class="dial-fill" cx="140" cy="140" r="117"/></svg>
+          <div id="volume-meter" class="dial-value" role="meter" aria-label="Last confirmed live volume" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Waiting for volume"><span id="volume">—</span><span class="dial-unit">PERCENT</span></div>
+        </div>
+        <p id="volume-caption" class="volume-caption">Waiting for the first live-volume session</p>
+        <div class="volume-stats"><div><span>Starting level</span><strong id="anchor">—</strong></div><div><span>Change</span><strong id="delta">—</strong></div><div><span>Last confirmed</span><strong id="age">—</strong></div></div>
+      </section>
+      <section class="panel motion-panel" aria-labelledby="motion-title">
+        <div class="panel-top"><h2 id="motion-title">Volume in motion</h2><span class="chart-key"><i></i>Confirmed level</span></div>
+        <div class="motion-heading"><div><h3 id="movement">Ready when you are</h3><p id="movement-detail">Wake the Watch and activate Wizardry to get started.</p></div><div id="motion-icon" class="motion-icon" aria-hidden="true">↕</div></div>
+        <div class="chart-wrap"><div class="chart-y"><span>100%</span><span>50%</span><span>0%</span></div><svg id="chart" class="chart" viewBox="0 0 640 180" preserveAspectRatio="none" role="img" aria-label="Confirmed volume over the last 30 seconds"><defs><linearGradient id="area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a899ff" stop-opacity=".25"/><stop offset="100%" stop-color="#a899ff" stop-opacity="0"/></linearGradient></defs><path class="chart-grid" d="M0 10H640 M0 90H640 M0 170H640"/><path id="chart-area" class="chart-area"/><path id="chart-line" class="chart-line"/><circle id="chart-point" r="4" class="chart-point" visibility="hidden"/></svg><div id="chart-empty" class="chart-empty">Your volume changes will appear here.</div></div>
+        <div class="chart-x"><span>30 seconds ago</span><span>Now</span></div>
+        <p class="chart-note">Based on accepted receiver values. Wrist motion and tap detection appear on your Watch and iPhone.</p>
+      </section>
+    </div>
+    <div class="bottom-grid">
+      <section class="panel guide-panel" aria-labelledby="guide-title"><div class="panel-top"><h2 id="guide-title">The gesture flow</h2><span class="subtle">COMPUTER PROFILE</span></div>
+        <div class="steps">
+          <div id="step-1" class="step"><span class="step-number">01</span><div class="gesture-symbol" aria-hidden="true">◷ <span>↗</span></div><h3>Activate & extend</h3><p>Wrist wake → double finger touch.<br>Hold still for the ready haptic, then extend to about 90° yaw.</p></div>
+          <div id="step-2" class="step"><span class="step-number">02</span><div class="gesture-symbol" aria-hidden="true">↑ <span>↓</span></div><h3>Raise & lower</h3><p>Short vertical strokes.<br>Raise to increase, lower to decrease. Pause to hold.</p></div>
+          <div id="step-3" class="step"><span class="step-number">03</span><div class="gesture-symbol" aria-hidden="true">◎</div><h3>Touch to lock</h3><p>One learned single finger touch,<br>or Lock volume on the Watch. Activate again for a new session.</p></div>
+        </div>
+      </section>
+      <section class="panel activity-panel" aria-labelledby="activity-title"><div class="panel-top"><h2 id="activity-title">Recent activity</h2><span id="count" class="subtle">0 accepted</span></div><ol id="events" class="events"><li class="empty-event">Listening for your first action…</li></ol></section>
+    </div>
+    <footer><p><span class="footer-dot"></span>Local receiver display <span class="footer-divider">/</span> <span id="footer-mode">No pairing token needed here</span></p><button id="preview" type="button" aria-pressed="false">Preview visuals <span aria-hidden="true">↗</span></button></footer>
+  </main>
+</body>
+</html>

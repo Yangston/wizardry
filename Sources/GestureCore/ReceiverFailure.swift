@@ -13,7 +13,7 @@ enum ReceiverFailure {
         let detail = reason.map {" · "+$0} ?? ""
         let hint: String
         switch status {
-        case 401,403: hint = "Re-enter the receiver's current pairing token in iPhone Setup. --pair creates a new token on every restart."
+        case 401,403: hint = "Enter the token printed by the running receiver in iPhone Setup. --pair changes it on restart; --token-file keeps pairing across restarts. Check that the receiver URL points to the same PC."
         case 404,405: hint = "This receiver URL does not provide live volume. Stop the old receiver and run the updated receiver/server.py; check the saved URL."
         case 408: hint = "The one-second live request expired or arrived ahead of the receiver clock. Sync the receiver computer's time, then activate again."
         case 409: hint = "The volume session is closed, missing, or out of order. Activate again; do not replay the rejected request."

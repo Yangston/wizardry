@@ -285,6 +285,7 @@ struct SetupView: View {
                     TextField("http://192.168.x.x:8765",text:$store.endpoint).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Receiver pairing token",text:$store.pairingToken).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Save pairing & test connection") { Task { await store.pairComputer() } }
+                        .disabled(store.pairingBusy)
                     Text(store.pairingStatus).font(.caption)
                     Link("Receiver installation instructions",destination:URL(string:"https://github.com/Yangston/wizardry/tree/main/receiver")!)
                     Text("The phone sends commands to the receiver on your local network. Tokens are stored in the iPhone Keychain and are never sent to the watch. Start with dry run. HTTP is intended for a trusted private network.").font(.caption)

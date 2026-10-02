@@ -1,11 +1,58 @@
 import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import urllib.request
 import uuid
 from http.server import HTTPServer
-from server import CommandProcessor, handler_for, KEY_CODES
+from server import CommandProcessor, handler_for, KEY_CODES, pairing_token_file
+
+
+class PairingTokenTests(unittest.TestCase):
+    def test_restart_preserves_authenticated_pairing_in_dry_run_and_execute(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".pairing-token"
+            token = pairing_token_file(path)
+            self.assertGreaterEqual(len(token), 16)
+            self.assertEqual(pairing_token_file(path), token)
+            if platform.system() != "Windows":
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            for execute in (False, True):
+                processor = CommandProcessor(pairing_token_file(path), execute=execute)
+                ping = {"id": str(uuid.uuid4()), "command": "ping", "timestamp": time.time()}
+                status, body = processor.handle("Bearer " + token, ping)
+                self.assertEqual(status, 200)
+                self.assertFalse(body["executed"])
+                self.assertEqual(processor.handle("Bearer incorrect-token", ping)[0], 401)
+                self.assertEqual(processor.handle_volume("Bearer incorrect-token", {})[0], 401)
+
+    def test_invalid_existing_file_is_not_silently_rotated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".pairing-token"
+            path.write_text("invalid", encoding="ascii")
+            with self.assertRaises(ValueError):
+                pairing_token_file(path)
+            self.assertEqual(path.read_text(encoding="ascii"), "invalid")
+
+    def test_windows_permission_failure_does_not_leave_a_credential(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".pairing-token"
+            identity = subprocess.CompletedProcess([], 0, stdout='"User","S-1-5-21-123"\n')
+            def command(args, **kwargs):
+                if args[0] == "whoami":
+                    return identity
+                self.assertEqual(path.read_bytes(), b"")
+                raise subprocess.CalledProcessError(1, args)
+            with patch("server.platform.system", return_value="Windows"), patch("server.subprocess.run", side_effect=command):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    pairing_token_file(path)
+            self.assertFalse(path.exists())
 
 
 class ReceiverTests(unittest.TestCase):

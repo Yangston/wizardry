@@ -7,7 +7,7 @@ A native iPhone and Apple Watch gesture remote, developed on Windows and built w
 - **iPhone companion:** set up your computer, connect Apple Home and Spotify, select a profile, and edit every gesture-to-action mapping.
 - **Watch:** touch-free AssistiveTouch/Shortcut launch with hold-still calibration and automatic arming, a 30-minute control session, explicit shortcut/button arming, experimental live computer volume and learned single-touch locking, an eight-second armed window, Double Tap on supported watches, and native Now Playing controls.
 - **Live motion:** opening screens show twist, tilt, yaw and volume feedback. iPhone Control / Live include a requested-versus-acknowledged volume graph and all sensor axes. Requested 100 Hz capture (actual hardware rate displayed), up to 20 Hz display, roughly 100 ms telemetry batches, bounded local buffers, and explicit stale status.
-- **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page.
+- **Computer:** Windows volume, mute, play/pause, track navigation, and next/previous slide or page. Launching the receiver opens a local visual display with a live volume dial, confirmed-volume chart, gesture guidance, and recent actions (`--no-ui` for console-only use).
 - **Phone:** Spotify playback on the active player, Apple Music controls, a locator chime, native volume slider, and named Shortcuts.
 - **Apple Home:** select existing lights, switches, Matter plugs, or scenes. No separate Matter commissioning is required.
 

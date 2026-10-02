@@ -10,6 +10,7 @@ final class PhoneStore: ObservableObject {
     @Published var endpoint: String
     @Published var pairingToken = ""
     @Published var pairingStatus = "Enter your computer receiver's address and token"
+    @Published private(set) var pairingBusy = false
     @Published private(set) var frames: [MotionFrame] = []
     @Published private(set) var lastTelemetry = Date.distantPast
     @Published private(set) var history: [ActionLog] = []
@@ -69,7 +70,7 @@ final class PhoneStore: ObservableObject {
             self.volumeBusy = true
             Task {
                 let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
-                let result = await self.network.volume(request,endpoint:self.endpoint,token:PairingKeychain.load())
+                let result = await self.network.volume(request,endpoint:UserDefaults.standard.string(forKey:"serverURL") ?? "",token:PairingKeychain.load())
                 self.lastVolumeReply = result
                 if request.operation == .end || result.outcome == .failed {
                     self.history.insert(.init(title:"Live computer volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
@@ -89,12 +90,21 @@ final class PhoneStore: ObservableObject {
     }
     func connectHome() { UserDefaults.standard.set(true,forKey:"homeEnabled"); home.connect() }
     func pairComputer() async {
-        guard pairingToken.count >= 16 else { pairingStatus = "Use a pairing token of at least 16 characters"; return }
+        guard !pairingBusy else { return }
+        let token = pairingToken.trimmingCharacters(in:.whitespacesAndNewlines)
+        let address = endpoint.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard token.count >= 16 else { pairingStatus = "Use a pairing token of at least 16 characters"; return }
+        pairingBusy = true
+        defer { pairingBusy = false }
+        pairingStatus = "Checking receiver…"
+        let result = await network.send("ping",endpoint:address,token:token)
+        guard result.outcome != .failed else { pairingStatus = result.message; return }
         do {
-            try PairingKeychain.save(pairingToken)
-            UserDefaults.standard.set(endpoint,forKey:"serverURL")
-            let result = await network.send("ping",endpoint:endpoint,token:pairingToken)
-            pairingStatus = result.outcome == .failed ? result.message : "Paired · receiver responded. Test an action below."
+            try PairingKeychain.save(token)
+            UserDefaults.standard.set(address,forKey:"serverURL")
+            pairingToken = token
+            endpoint = address
+            pairingStatus = "Paired · receiver responded. Test an action below."
         } catch { pairingStatus = error.localizedDescription }
     }
     func test(_ binding: GestureBinding) { Task { _ = await perform(binding,deadline:Date().timeIntervalSince1970+5) } }
