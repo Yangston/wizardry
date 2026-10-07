@@ -9,10 +9,8 @@ final class PhoneConnectionTests: XCTestCase {
         let toggle = app.switches["computer-studio-toggle"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout:5))
         reveal(toggle,in:app)
-        if toggle.value as? String != "1" { toggle.tap() }
-        XCTAssertEqual(toggle.value as? String,"1")
-        toggle.tap()
-        XCTAssertEqual(toggle.value as? String,"0")
+        setSwitch(toggle,to:true)
+        setSwitch(toggle,to:false)
         app.tabBars.buttons["Control"].tap()
         XCTAssertTrue(app.segmentedControls.buttons["Phone"].isSelected)
         app.segmentedControls.buttons["Computer"].tap()
@@ -45,9 +43,20 @@ final class PhoneConnectionTests: XCTestCase {
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<6 {
-            if element.isHittable { return }
+            let viewport = app.scrollViews.firstMatch.frame.insetBy(dx:0,dy:12)
+            if element.isHittable && viewport.contains(element.frame) { return }
             app.swipeUp()
         }
         XCTAssertTrue(element.isHittable)
+    }
+    private func setSwitch(_ element: XCUIElement, to enabled: Bool) {
+        let desired = enabled ? "1" : "0"
+        if element.value as? String != desired {
+            // SwiftUI exposes the full labeled row as a switch. Hit its native
+            // trailing control rather than the label or a clipped row center.
+            element.coordinate(withNormalizedOffset:CGVector(dx:0.95,dy:0.5)).tap()
+        }
+        let changed = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value == %@",desired),object:element)
+        XCTAssertEqual(XCTWaiter.wait(for:[changed],timeout:5),.completed)
     }
 }
