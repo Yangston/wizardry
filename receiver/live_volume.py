@@ -5,10 +5,14 @@ from windows_audio import WindowsAudio
 
 
 class LiveVolumeProcessor:
-    def __init__(self, execute=False, clock=None, audio=None):
+    UPDATE_RATE = 50.0
+    UPDATE_BURST = 4.0
+
+    def __init__(self, execute=False, clock=None, audio=None, pacing_clock=None):
         import time
         self.execute = execute
         self.clock = clock or time.time
+        self.pacing_clock = pacing_clock or time.monotonic
         self.audio = audio or WindowsAudio()
         self.active = None
         self.closed = {}
@@ -52,8 +56,8 @@ class LiveVolumeProcessor:
         if operation != "begin":
             if not self.active or self.active["id"] != session_id or self.active["revision"] != revision or sequence <= self.active["sequence"]:
                 return 409, {"error": "Unknown session or older sequence"}
-            if operation == "update" and now-self.active["update"] < 0.049:
-                return 429, {"error": "Maximum twenty volume updates per second"}
+            if operation == "update" and not self._take_update_token():
+                return 429, {"error": "Maximum fifty volume updates per second (burst four)"}
         elif self.active and self.active["id"] == session_id:
             return 409, {"error": "Session already begun"}
         self.seen[event_id] = now
@@ -64,12 +68,11 @@ class LiveVolumeProcessor:
                     self.active = None
                 volume, device = self.audio.read() if self.execute else (self.dry_volume, "dry-run")
                 self.active = {"id": session_id, "revision": revision, "sequence": 0,
-                               "last": now, "update": float("-inf"), "device": device}
+                               "last": now, "device": device,
+                               "tokens": self.UPDATE_BURST, "paced_at": self.pacing_clock()}
             else:
                 self.active["sequence"] = sequence
                 self.active["last"] = now
-                if operation == "update":
-                    self.active["update"] = now
                 # Close before I/O so even a failed final set cannot reopen it.
                 device = self.active["device"]
                 if operation == "end":
@@ -82,5 +85,22 @@ class LiveVolumeProcessor:
             self.closed[session_id] = now
             self.active = None
             return 503, {"error": str(error)}
-        return 200, {"outcome": "executed" if self.execute else "dryRun", "message": "Locked" if operation == "end" else "Volume accepted",
-                     "sessionID": session_id, "sequence": sequence, "volume": volume, "serverTime": self.clock()}
+        reply = {"outcome": "executed" if self.execute else "dryRun", "message": "Locked" if operation == "end" else "Volume accepted",
+                 "sessionID": session_id, "sequence": sequence, "volume": volume, "serverTime": self.clock()}
+        if operation == "begin":
+            reply["transportVersion"] = 2
+        return 200, reply
+
+    def _take_update_token(self):
+        # Network delivery can bunch fresh ordered samples together. Permit a
+        # small burst without allowing an unbounded backlog or relying on the
+        # wall clock used for request expiry. A backward clock cannot refill.
+        paced_at = max(self.active["paced_at"], self.pacing_clock())
+        tokens = min(self.UPDATE_BURST, self.active["tokens"] +
+                     (paced_at-self.active["paced_at"]) * self.UPDATE_RATE)
+        self.active["paced_at"] = paced_at
+        self.active["tokens"] = tokens
+        if tokens + 1e-9 < 1:
+            return False
+        self.active["tokens"] = max(0.0, tokens-1)
+        return True

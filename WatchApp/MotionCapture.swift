@@ -3,6 +3,7 @@ import Foundation
 
 struct CapturedMotion {
     var time: Double; var roll: Double; var pitch: Double; var yaw: Double
+    var callbackTime: Double; var rawHz: Double
     var attitude: MotionQuaternion
     var acceleration: MotionVector; var rotation: MotionVector; var gravity: MotionVector
 }
@@ -12,6 +13,7 @@ struct CapturedMotion {
 final class MotionCapture: @unchecked Sendable {
     let queue: OperationQueue = {
         let queue = OperationQueue(); queue.name = "Wizardry motion"; queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .userInteractive
         return queue
     }()
     private var rotation = MotionVector(x:0,y:0,z:0)
@@ -22,6 +24,7 @@ final class MotionCapture: @unchecked Sendable {
     private var enrollmentLastSample: Double?
     private var enrollmentSamples = 0
     private var enrollmentFirstSample: Double?
+    private var rawTimes: [Double] = []
     var motionDelivered: ((CapturedMotion) -> Void)?
     var tapDelivered: ((FingerTapDetector.Output) -> Void)?
     var enrollmentDelivered: ((TapEnrollment, Bool) -> Void)?
@@ -44,12 +47,17 @@ final class MotionCapture: @unchecked Sendable {
     func accept(_ motion: CMDeviceMotion) {
         let a = motion.userAcceleration, r = motion.rotationRate, g = motion.gravity, q = motion.attitude.quaternion
         rotation = .init(x:r.x,y:r.y,z:r.z); rotationTime = motion.timestamp
+        let rate = rawTimes.count > 1 ? Double(rawTimes.count-1)/max(0.001,(rawTimes.last ?? 0)-(rawTimes.first ?? 0)) : 0
         motionDelivered?(.init(time:motion.timestamp,roll:motion.attitude.roll,pitch:motion.attitude.pitch,yaw:motion.attitude.yaw,
+                              callbackTime:ProcessInfo.processInfo.systemUptime,rawHz:rate,
                               attitude:.init(x:q.x,y:q.y,z:q.z,w:q.w),acceleration:.init(x:a.x,y:a.y,z:a.z),
                               rotation:rotation,gravity:.init(x:g.x,y:g.y,z:g.z)))
     }
     func accept(_ sample: CMAccelerometerData) {
         let now = ProcessInfo.processInfo.systemUptime
+        rawTimes.append(sample.timestamp)
+        rawTimes.removeAll { sample.timestamp-$0 > 1 }
+        if rawTimes.count > 200 { rawTimes.removeFirst(rawTimes.count-200) }
         guard sample.timestamp <= now, now-sample.timestamp <= 0.25 else {
             detector.reset()
             if let learning = enrollment {

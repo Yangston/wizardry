@@ -17,6 +17,48 @@ private final class FakeRuntimeDriver: InteractionRuntimeDriver {
 
 final class InteractionRuntimeTests: XCTestCase {
     @MainActor
+    func testCalibrationReadyVolumeAndFinalAcknowledgementShareOneLease() async {
+        var now = 10.0
+        let driver = FakeRuntimeDriver()
+        let runtime = InteractionRuntime(clock:{now},makeDriver:{driver})
+        XCTAssertTrue(runtime.start(until:20,canStart:true))
+        driver.didStart?()
+        now = 10.3
+        XCTAssertTrue(runtime.continueThroughArming(until:18.3))
+        now = 11
+        XCTAssertTrue(runtime.continueThroughVolume(until:1800))
+        XCTAssertEqual(driver.starts,1)
+        XCTAssertEqual(driver.invalidations,0)
+        XCTAssertEqual(runtime.deadline,610)
+        // Beginning a final write is not a runtime stop; the owner releases it
+        // only when final readback arrives (or a deadline/interruption occurs).
+        now = 11.2
+        XCTAssertTrue(runtime.isRequested)
+        runtime.stop(reason:.volumeLocked)
+        XCTAssertEqual(driver.invalidations,1)
+    }
+
+    @MainActor
+    func testStopDiagnosticsRunBeforeDriverReleaseAndAfterCleanup() async {
+        let driver = FakeRuntimeDriver()
+        let runtime = InteractionRuntime(clock:{10},makeDriver:{driver})
+        var reasons: [InteractionEndReason] = []
+        runtime.willStop = { reason in
+            XCTAssertTrue(runtime.isRequested)
+            XCTAssertEqual(driver.invalidations,0)
+            reasons.append(reason)
+        }
+        runtime.didStop = {
+            XCTAssertFalse(runtime.isRequested)
+            XCTAssertEqual(driver.invalidations,1)
+        }
+        XCTAssertTrue(runtime.start(until:20,canStart:true))
+        runtime.stop(reason:.background)
+        runtime.stop(reason:.explicitStop)
+        XCTAssertEqual(reasons,[.background])
+    }
+
+    @MainActor
     func testExpiryWithoutMotionStopsPendingSessionAndCannotBeRevivedByLateStart() async {
         var now = 10.0
         let driver = FakeRuntimeDriver()

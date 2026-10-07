@@ -57,7 +57,7 @@ def pairing_token_file(path):
 
 
 class CommandProcessor:
-    def __init__(self, token, execute=False, clock=time.time, volume_action=None):
+    def __init__(self, token, execute=False, clock=time.time, volume_action=None, pacing_clock=None):
         if len(token) < 16:
             raise ValueError("WIZARDRY_TOKEN must contain at least 16 characters")
         self.token = token
@@ -66,7 +66,7 @@ class CommandProcessor:
         self.volume_action = volume_action or windows_volume
         self.seen = {}
         self.last_action = float("-inf")
-        self.live_volume = LiveVolumeProcessor(execute=execute, clock=clock)
+        self.live_volume = LiveVolumeProcessor(execute=execute, clock=clock, pacing_clock=pacing_clock)
         self.dashboard = DashboardState(execute=execute, clock=clock)
 
     def handle_volume(self, authorization, payload):
@@ -114,6 +114,7 @@ class CommandProcessor:
         if command == "ping":
             reply["serverTime"] = self.clock()
             reply["liveVolume"] = True
+            reply["liveVolumeProtocol"] = 2
         self.dashboard.command(command, executed)
         return 200, reply
 

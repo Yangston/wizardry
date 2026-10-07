@@ -94,8 +94,36 @@ class ReceiverTests(unittest.TestCase):
         self.assertFalse(body["executed"])
         self.assertEqual(self.actions, [])
         self.processor.execute = True
-        self.processor.handle("Bearer test-token-123456789", self.command("ping"))
+        status, body = self.processor.handle("Bearer test-token-123456789", self.command("ping"))
+        self.assertEqual(status, 200)
+        self.assertTrue(body["liveVolume"])
+        self.assertEqual(body["liveVolumeProtocol"], 2)
         self.assertEqual(self.actions, [])
+
+    def test_live_volume_capabilities_require_authenticated_ping(self):
+        status, body = self.processor.handle("wrong", self.command("ping"))
+        self.assertEqual(status, 401)
+        self.assertNotIn("liveVolumeProtocol", body)
+        self.assertNotIn("liveVolume", body)
+
+    def test_unauthorized_volume_requests_do_not_consume_burst(self):
+        processor = CommandProcessor("test-token-123456789", clock=lambda: 100,
+                                     pacing_clock=lambda: 10)
+        session_id = str(uuid.uuid4())
+        def request(operation, sequence):
+            payload = {"id": str(uuid.uuid4()), "sessionID": session_id,
+                       "revision": "r1", "operation": operation,
+                       "sequence": sequence, "createdAt": 100}
+            if operation != "begin":
+                payload["target"] = 0.5
+            return payload
+        auth = "Bearer test-token-123456789"
+        self.assertEqual(processor.handle_volume(auth, request("begin", 0))[0], 200)
+        for sequence in range(1, 5):
+            self.assertEqual(processor.handle_volume("wrong", request("update", sequence))[0], 401)
+        for sequence in range(1, 5):
+            self.assertEqual(processor.handle_volume(auth, request("update", sequence))[0], 200)
+        self.assertEqual(processor.handle_volume(auth, request("update", 5))[0], 429)
 
     def test_real_http_round_trip(self):
         processor = CommandProcessor("test-token-123456789")
@@ -110,7 +138,9 @@ class ReceiverTests(unittest.TestCase):
                 headers={"Authorization": "Bearer test-token-123456789", "Content-Type": "application/json"})
             with urllib.request.urlopen(request, timeout=2) as response:
                 self.assertEqual(response.status, 200)
-                self.assertFalse(json.load(response)["executed"])
+                body = json.load(response)
+                self.assertFalse(body["executed"])
+                self.assertEqual(body["liveVolumeProtocol"], 2)
         finally:
             server.shutdown()
             server.server_close()

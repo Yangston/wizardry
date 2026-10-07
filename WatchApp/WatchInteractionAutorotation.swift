@@ -17,7 +17,7 @@ final class WatchInteractionAutorotation: InteractionRuntimeDriver {
         }
         WKApplication.shared().isAutorotating = true
         enabled = true
-        logger.info("Interaction autorotation enabled")
+        logger.info("Interaction autorotation requested; readback=\(WKApplication.shared().isAutorotating)")
         didStart?()
     }
 

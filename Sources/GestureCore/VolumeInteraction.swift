@@ -145,12 +145,15 @@ struct VolumeRequest: Codable, Equatable {
 }
 
 struct VolumeReply: Codable {
+    enum Disposition: String, Codable { case applied, superseded }
     var outcome: ActionResult.Outcome
     var message: String
     var sessionID: UUID
     var sequence: Int
     var volume: Double?
     var serverTime: Double? = nil
+    var transportVersion: Int? = nil
+    var disposition: Disposition? = nil
     static func failure(_ message: String, request: VolumeRequest) -> Self {
         .init(outcome:.failed,message:message,sessionID:request.sessionID,sequence:request.sequence,volume:nil)
     }

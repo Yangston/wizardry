@@ -30,9 +30,15 @@ class FakeAudio:
 class LiveVolumeTests(unittest.TestCase):
     def setUp(self):
         self.now = 100.0
+        self.pacing_now = 10.0
         self.audio = FakeAudio()
-        self.processor = LiveVolumeProcessor(True, lambda: self.now, self.audio)
+        self.processor = LiveVolumeProcessor(True, lambda: self.now, self.audio,
+                                             pacing_clock=lambda: self.pacing_now)
         self.session = str(uuid.uuid4())
+
+    def advance(self, seconds):
+        self.now += seconds
+        self.pacing_now += seconds
 
     def request(self, operation="begin", sequence=0, target=None, **changes):
         value = {"id": str(uuid.uuid4()), "sessionID": self.session, "revision": "r1",
@@ -46,6 +52,7 @@ class LiveVolumeTests(unittest.TestCase):
         status, reply = self.processor.handle(self.request())
         self.assertEqual(status, 200)
         self.assertEqual(reply["volume"], 0.37)
+        self.assertEqual(reply["transportVersion"], 2)
         self.assertEqual(self.audio.sets, [])
         self.assertEqual(self.processor.handle(self.request("update", 1, 0.6))[0], 200)
         self.now += 0.21
@@ -75,16 +82,19 @@ class LiveVolumeTests(unittest.TestCase):
             self.assertEqual(self.processor.handle(self.request("update", 1, target))[0], 400)
         self.assertEqual(self.audio.sets, [])
 
-    def test_order_revision_duplicate_and_rate_limit(self):
+    def test_order_revision_duplicate_do_not_consume_tokens(self):
         begin = self.request()
         self.processor.handle(begin)
         self.assertEqual(self.processor.handle(begin)[0], 409)
         self.assertEqual(self.processor.handle(self.request("update", 1, 0.5, revision="old"))[0], 409)
-        self.assertEqual(self.processor.handle(self.request("update", 2, 0.5))[0], 200)
-        self.assertEqual(self.processor.handle(self.request("update", 3, 0.6))[0], 429)
-        self.now += 0.21
+        update = self.request("update", 2, 0.5)
+        self.assertEqual(self.processor.handle(update)[0], 200)
+        self.assertEqual(self.processor.handle(update)[0], 409)
         self.assertEqual(self.processor.handle(self.request("update", 1, 0.6))[0], 409)
-        self.assertEqual(self.processor.handle(self.request("update", 3, 0.6))[0], 200)
+        for sequence in range(3, 6):
+            self.assertEqual(self.processor.handle(self.request("update", sequence, 0.6))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 6, 0.7))[0], 429)
+        self.assertEqual(self.audio.sets, [0.5, 0.6, 0.6, 0.6])
 
     def test_twenty_hz_gradual_updates_start_at_live_volume_without_reset(self):
         self.audio.value = 0.73
@@ -94,15 +104,73 @@ class LiveVolumeTests(unittest.TestCase):
         self.assertEqual(self.audio.sets, [])
         targets = [0.73 + step*0.001 for step in range(1, 21)]
         for sequence, target in enumerate(targets, 1):
-            self.now += 0.05
+            self.advance(0.05)
             self.assertEqual(self.processor.handle(self.request("update", sequence, target))[0], 200)
         self.assertEqual(self.audio.sets, targets)
-        self.now += 0.02
-        self.assertEqual(self.processor.handle(self.request("update", 21, 0.8))[0], 429)
-        self.assertEqual(self.audio.value, targets[-1])
-        # Final lock must not wait for the update throttle.
-        self.assertEqual(self.processor.handle(self.request("end", 22, targets[-1]))[0], 200)
-        self.assertEqual(self.processor.handle(self.request("update", 23, 0.8))[0], 409)
+        self.assertEqual(self.processor.handle(self.request("end", 21, targets[-1]))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 22, 0.8))[0], 409)
+
+    def test_fifty_hz_sustained_updates_preserve_every_ordered_target(self):
+        self.processor.handle(self.request())
+        targets = [0.2 + (step % 300)*0.001 for step in range(1, 501)]
+        for sequence, target in enumerate(targets, 1):
+            self.advance(0.02)
+            self.assertEqual(self.processor.handle(self.request("update", sequence, target))[0], 200)
+        self.assertEqual(self.audio.sets, targets)
+        self.assertEqual(self.processor.active["sequence"], 500)
+
+    def test_four_request_burst_is_bounded_and_end_bypasses_limiter(self):
+        self.processor.handle(self.request())
+        for sequence in range(1, 5):
+            self.assertEqual(self.processor.handle(self.request("update", sequence, 0.5))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 5, 0.9))[0], 429)
+        self.assertEqual(self.processor.active["sequence"], 4)
+        self.assertEqual(self.audio.sets, [0.5]*4)
+        status, reply = self.processor.handle(self.request("end", 6, 0.4))
+        self.assertEqual(status, 200)
+        self.assertEqual(reply["volume"], 0.4)
+        self.assertIsNone(self.processor.active)
+        self.assertEqual(self.processor.handle(self.request("update", 7, 0.9))[0], 409)
+
+    def test_tokens_refill_at_fifty_hz_and_never_exceed_four(self):
+        self.processor.handle(self.request())
+        for sequence in range(1, 5):
+            self.processor.handle(self.request("update", sequence, 0.5))
+        self.advance(0.019)
+        self.assertEqual(self.processor.handle(self.request("update", 5, 0.6))[0], 429)
+        self.advance(0.001)
+        self.assertEqual(self.processor.handle(self.request("update", 6, 0.6))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 7, 0.7))[0], 429)
+        self.advance(1)
+        for sequence in range(8, 12):
+            self.assertEqual(self.processor.handle(self.request("update", sequence, 0.5))[0], 200)
+        self.assertEqual(self.processor.handle(self.request("update", 12, 0.7))[0], 429)
+
+    def test_wall_clock_changes_do_not_refill_pacing_and_expiry_stays_wall_based(self):
+        self.processor.handle(self.request())
+        for sequence in range(1, 5):
+            self.processor.handle(self.request("update", sequence, 0.5))
+        self.now += 3
+        self.assertEqual(self.processor.handle(self.request("update", 5, 0.9))[0], 429)
+        self.now -= 4
+        self.assertEqual(self.processor.handle(self.request("update", 6, 0.9))[0], 429)
+        self.pacing_now += 0.02
+        self.assertEqual(self.processor.handle(self.request("update", 7, 0.6))[0], 200)
+        self.pacing_now += 1
+        self.assertEqual(self.processor.handle(self.request("update", 8, 0.9, createdAt=self.now-1.01))[0], 408)
+        self.assertEqual(self.processor.handle(self.request("update", 9, 0.9, createdAt=self.now+0.11))[0], 408)
+        self.assertEqual(self.audio.value, 0.6)
+
+    def test_backward_pacing_clock_does_not_create_tokens(self):
+        self.processor.handle(self.request())
+        for sequence in range(1, 5):
+            self.processor.handle(self.request("update", sequence, 0.5))
+        self.pacing_now -= 1
+        self.assertEqual(self.processor.handle(self.request("update", 5, 0.8))[0], 429)
+        self.pacing_now += 1
+        self.assertEqual(self.processor.handle(self.request("update", 6, 0.8))[0], 429)
+        self.pacing_now += 0.02
+        self.assertEqual(self.processor.handle(self.request("update", 7, 0.6))[0], 200)
 
     def test_idle_expiry_device_change_and_new_session_invalidate_old(self):
         self.processor.handle(self.request())
@@ -137,6 +205,7 @@ class LiveVolumeTests(unittest.TestCase):
         status, ping = processor.handle(auth,{"id":str(uuid.uuid4()),"command":"ping","timestamp":100.0})
         self.assertEqual(status,200)
         self.assertTrue(ping["liveVolume"])
+        self.assertEqual(ping["liveVolumeProtocol"],2)
         self.assertEqual(ping["serverTime"],102.0)
         unaligned = self.request(createdAt=100.0)
         self.assertEqual(processor.handle_volume(auth,unaligned)[0],408)
@@ -145,6 +214,7 @@ class LiveVolumeTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertEqual(reply["serverTime"],102.0)
         self.assertEqual(reply["volume"],0.5)
+        self.assertEqual(reply["transportVersion"],2)
         stale = self.request(createdAt=100.5)  # still rejected against PC clock
         self.assertEqual(processor.handle_volume(auth,stale)[0],408)
 
@@ -165,6 +235,7 @@ class LiveVolumeTests(unittest.TestCase):
             with post(event, "Bearer test-token-123456789") as response:
                 reply = json.load(response)
                 self.assertEqual(reply["volume"], 0.5)
+                self.assertEqual(reply["transportVersion"], 2)
             event = self.request("end", 1, 0.42, createdAt=time.time())
             with post(event, "Bearer test-token-123456789") as response:
                 self.assertEqual(json.load(response)["volume"], 0.42)

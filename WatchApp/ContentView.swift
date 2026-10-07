@@ -5,6 +5,7 @@ struct ContentView: View {
     @ObservedObject var motion: MotionController
     @ObservedObject var link: WatchLink
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     var body: some View {
         NavigationStack(path:$motion.navigationPath) {
             ScrollView {
@@ -40,6 +41,16 @@ struct ContentView: View {
                     Text(String(format:"Yaw change %+.0f° · %.0f Hz",motion.yawDegrees,motion.sampleRate))
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
                     Text("Setup, pairing & live graphs are on iPhone.").font(.caption2).multilineTextAlignment(.center)
+                    if let diagnostic = motion.interactionDiagnostics {
+                        DisclosureGroup("Awake diagnostics") {
+                            Text("Scene: \(diagnostic.scene) · display: \(diagnostic.reducedLuminance ? "reduced" : "full")")
+                            Text("Autorotation requested: \(diagnostic.requested ? "yes" : "no") · enabled: \(diagnostic.enabled ? "yes" : "no")")
+                            Text(String(format:"Motion %.0f Hz · raw %.0f Hz · delay %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.processingDelayMS))
+                            Text(String(format:"Confirmed %.1f Hz · reply %.0f ms",diagnostic.confirmedUpdateHz,diagnostic.roundTripMS))
+                            Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
+                            Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time)")
+                        }.font(.caption2)
+                    }
                 }.padding(.horizontal,3)
             }.navigationTitle("Wizardry")
                 .navigationDestination(for:MotionController.Screen.self) { screen in
@@ -59,6 +70,7 @@ struct ContentView: View {
             }
         }
         .onChange(of:motion.navigationPath) { _,_ in motion.navigationChanged() }
+        .onChange(of:isLuminanceReduced,initial:true) { _,value in motion.setReducedLuminance(value) }
     }
     private var armButton: some View {
         Button(motion.armed ? "Armed · \(motion.armRemaining)s" : "Arm now") { motion.arm() }
@@ -75,7 +87,7 @@ struct ContentView: View {
                 Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. While armed, the screen can flip when you turn your wrist away. Leaving Wizardry disarms it.")
                 Text("Live volume · experimental").font(.headline)
                 Text("Look at the Watch while holding still for the ready haptic. Extend your arm until z / yaw changes about 90° from that pose. Hold briefly for the entry haptic, then raise or lower vertically in short strokes with pauses. One learned single finger tap locks volume. Lock volume works before enrollment.")
-                Text("Volume stops after five seconds without movement, returning to the viewing pose, or interrupted sensing. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
+                Text("Rotate freely while adjusting; looking back at the Watch does not stop volume. Lock when done. Five seconds without movement or interrupted sensing also stops it. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
                 Text("Computer controls the paired receiver. Phone uses an experimental native volume-slider bridge: keep Wizardry open on iPhone with its volume slider visible. Both use current-volume readback; no Shortcut is needed for live Phone adjustment.")
                 Text("Manual control").font(.headline)
                 Text("Tap Arm, hold still looking at the Watch for the ready haptic, then extend or make your action.")

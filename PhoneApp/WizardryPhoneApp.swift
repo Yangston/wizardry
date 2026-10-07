@@ -331,7 +331,7 @@ struct SetupView: View {
                     Text("Select Apple Music actions in Motions if you use Apple's Music app.").font(.caption)
                 }
                 Section("Session behavior") {
-                    Text("Sessions last up to 30 minutes. Activate while looking at the Watch to capture the yaw reference. Enter an action within the armed window. Live volume then remains active until lock, five seconds without movement, return to the viewing yaw, or interrupted sensing. Fresh motion is required during dimming; leaving Wizardry disarms controls.")
+                    Text("Sessions last up to 30 minutes. Activate while looking at the Watch to capture the yaw reference. Enter an action within the armed window. Rotate freely during live volume: looking back at the Watch does not stop it. Lock, five seconds without movement, or interrupted sensing ends adjustment. Leaving Wizardry disarms controls. Awake behavior during wrist tilt needs physical-watch verification.")
                     Text("Discrete commands expire after five seconds; live volume messages expire after one second. Neither is retried or queued for later replay. A haptic confirms recognition. Watch and phone status show requested volume, receiver acknowledgement, dry runs, and errors separately.")
                 }.font(.caption)
             }.navigationTitle("Setup")

@@ -1,6 +1,7 @@
 import Combine
 import CoreMotion
 import Foundation
+import OSLog
 import WatchKit
 
 @MainActor
@@ -20,6 +21,7 @@ final class MotionController: ObservableObject {
     @Published private(set) var yawDegrees = 0.0
     @Published private(set) var volumeMotion: VolumeMotionFeedback?
     @Published private(set) var sampleRate = 0.0
+    @Published private(set) var interactionDiagnostics: InteractionDiagnosticsSnapshot?
     @Published private(set) var count = 0
     @Published private(set) var lastGesture = "None yet"
     @Published private(set) var actionStatus = "Set up actions on your iPhone"
@@ -44,7 +46,11 @@ final class MotionController: ObservableObject {
     private var volumeClaimed = false
     private var tapFrozen = false
     private var pendingMotion: [CapturedMotion] = []
-    private var viewingSince: Double?
+    private var diagnostics = InteractionDiagnostics()
+    private var reducedLuminance = false
+    private var lastDiagnostics = -Double.infinity
+    private var pendingVolumeStopReason: InteractionEndReason?
+    private let logger = Logger(subsystem:"com.yangston.wizardry",category:"InteractionDiagnostics")
     private var ignoreTapsUntil = 0.0
     private var enrollmentDeadline = 0.0
     private var gestures = ForegroundGestureSession()
@@ -53,14 +59,21 @@ final class MotionController: ObservableObject {
     private var armExpiryTask: Task<Void,Never>?
     private var generation = 0
     private var lastDisplay = 0.0
-    private var firstSample: Double?
-    private var samples = 0
     private var buffer: [MotionFrame] = []
     private var sessionEnd: Date?
     private var actionID: UUID?
     private var expiryTask: Task<Void,Never>?
 
     init() {
+        interactionRuntime.willStop = { [weak self] reason in
+            self?.recordDiagnostic("release:\(reason.rawValue)",stop:reason)
+        }
+        interactionRuntime.didStop = { [weak self] in self?.publishDiagnostics(persist:true) }
+        if let data = UserDefaults.standard.data(forKey:"lastInteractionDiagnostics"),
+           let saved = try? JSONDecoder().decode(InteractionDiagnosticsSnapshot.self,from:data), saved.isValid {
+            interactionDiagnostics = saved
+            diagnostics.restore(saved)
+        }
         interactionRuntime.interrupted = { [weak self] message in
             self?.pause(message)
         }
@@ -72,9 +85,9 @@ final class MotionController: ObservableObject {
             self.configuration = config
             if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
             if changed {
-                if self.activation.isPending { self.stop("Settings changed · activate again") }
-                else if self.gestures.phase != .active { self.pause("Settings changed · raise wrist to resume") }
-                else { self.configureEngine() }
+                if self.activation.isPending { self.stop("Settings changed · activate again",reason:.settingsChanged) }
+                else if self.gestures.phase != .active { self.pause("Settings changed · raise wrist to resume",reason:.settingsChanged) }
+                else { self.configureEngine(reason:.settingsChanged) }
                 self.actionID = nil
             }
             self.actionStatus = "Synced: \(config.selectedProfile.name)"; self.actionFailed = false
@@ -91,18 +104,19 @@ final class MotionController: ObservableObject {
         }
         volume.didFinish = { [weak self] in
             guard let self, self.volumeClaimed else { return }
-            self.interactionRuntime.stop()
+            self.interactionRuntime.stop(reason:self.volume.state == .failed ? .transportFailure : self.pendingVolumeStopReason ?? .volumeStopped)
             self.gestures.reset(); self.armed = false; self.armRemaining = 0
             self.status = self.volume.message
             if self.volume.state == .locked { self.haptic(.success) }
         }
         configureEngine()
     }
-    private func configureEngine() {
-        interactionRuntime.stop()
+    private func configureEngine(reason: InteractionEndReason = .replaced) {
+        interactionRuntime.stop(reason:reason)
         armExpiryTask?.cancel(); armExpiryTask = nil
         if volume.ownsMotion { volume.finish(lock:false) }
-        volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; viewingSince = nil; pendingMotion = []
+        volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; pendingMotion = []
+        pendingVolumeStopReason = nil
         viewingAngles = nil; extending = false; yawDegrees = 0; rollDegrees = 0; pitchDegrees = 0; volumeMotion = nil
         gestures.reset()
         gestures.engine.threshold = configuration.threshold
@@ -120,10 +134,10 @@ final class MotionController: ObservableObject {
             while !Task.isCancelled {
                 do { try await Task.sleep(for:.seconds(1)) } catch { return }
                 guard let self, let end = self.sessionEnd else { return }
-                if Date() >= end { self.stop("Session ended after 30 minutes"); return }
+                if Date() >= end { self.stop("Session ended after 30 minutes",reason:.runtimeExpired); return }
                 if self.interactionRuntime.expireIfNeeded() { continue }
                 let now = ProcessInfo.processInfo.systemUptime
-                if self.volume.ownsMotion && now-self.lastDelivery > 0.25 { self.endVolume(lock:false) }
+                if self.volume.ownsMotion && now-self.lastDelivery > 0.25 { self.endVolume(lock:false,reason:.staleMotion) }
                 if self.enrollmentRecording {
                     self.enrollmentRemaining = max(0,Int(ceil(self.enrollmentDeadline-now)))
                     if now-self.lastDelivery > 0.25 { self.cancelEnrollment("Recording interrupted - repeat this step") }
@@ -135,12 +149,19 @@ final class MotionController: ObservableObject {
     func resume() {
         guard gestures.phase == .active, navigationPath.last != .nowPlaying, sessionActive, !running else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if activation.expire(at:now) { stop("Activation timed out · activate again"); return }
-        guard let end = sessionEnd, Date() < end else { stop("Session expired — start again"); return }
-        guard manager.isDeviceMotionAvailable, manager.isAccelerometerAvailable else { stop("Motion unavailable on this device"); return }
-        configureEngine(); firstSample = nil; samples = 0; lastDisplay = 0; buffer = []; sampleRate = 0
+        if activation.expire(at:now) { stop("Activation timed out · activate again",reason:.activationTimeout); return }
+        guard let end = sessionEnd, Date() < end else { stop("Session expired — start again",reason:.runtimeExpired); return }
+        guard manager.isDeviceMotionAvailable, manager.isAccelerometerAvailable else { stop("Motion unavailable on this device",reason:.sensorFailure); return }
+        configureEngine(); lastDisplay = 0; buffer = []; sampleRate = 0
+        diagnostics.beginCapture()
         generation += 1; let capture = generation
         activation.beginCapture(at:now)
+        if activation.isPending {
+            // Acquire as soon as foreground calibration starts. Readiness and
+            // live volume retain this same lease without a wrist-sleep gap.
+            guard interactionRuntime.start(until:now+ShortcutActivation.timeout,canStart:gestures.phase == .active) else { return }
+            recordDiagnostic("calibration-awake")
+        }
         running = true
         status = activation.isPending ? "Hold still - preparing gestures" : "Activate Wizardry or tap Arm"
         lastAccepted = nil; lastMotion = nil
@@ -184,31 +205,33 @@ final class MotionController: ObservableObject {
             if let motion { worker.accept(motion) }
             else { Task { @MainActor in
                 guard let self, self.generation == capture else { return }
-                self.stop(error?.localizedDescription ?? "Motion unavailable")
+                self.stop(error?.localizedDescription ?? "Motion unavailable",reason:.sensorFailure)
             } }
         }
         manager.startAccelerometerUpdates(to:worker.queue) { [weak self] sample,error in
             if let sample { worker.accept(sample) }
             else { Task { @MainActor in
                 guard let self, self.generation == capture else { return }
-                self.stop(error?.localizedDescription ?? "Raw acceleration unavailable")
+                self.stop(error?.localizedDescription ?? "Raw acceleration unavailable",reason:.sensorFailure)
             } }
         }
     }
 
-    func pause(_ message: String = "Paused · raise wrist to resume") {
+    func pause(_ message: String = "Paused · raise wrist to resume", reason: InteractionEndReason = .activationInterrupted) {
         cancelShortcutActivation()
-        suspendCapture(message)
+        suspendCapture(message,reason:reason)
     }
-    private func suspendCapture(_ message: String) {
+    private func suspendCapture(_ message: String, reason: InteractionEndReason = .activationInterrupted) {
         cancelEnrollment("Recording interrupted - repeat this step")
         capture?.cancelEnrollment()
-        generation += 1; manager.stopDeviceMotionUpdates(); manager.stopAccelerometerUpdates(); running = false; buffer = []; configureEngine()
+        generation += 1; manager.stopDeviceMotionUpdates(); manager.stopAccelerometerUpdates(); running = false; buffer = []; configureEngine(reason:reason)
         if sessionActive { status = message }
     }
     func setScenePhase(_ phase: ForegroundGestureSession.Phase) {
         let now = ProcessInfo.processInfo.systemUptime
-        let canContinue = gestures.transition(to:phase,at:now) || (phase == .inactive && volume.ownsMotion)
+        let canContinue = gestures.transition(to:phase,at:now) ||
+            (phase == .inactive && (volume.ownsMotion || (activation.isPending && interactionRuntime.isRequested)))
+        recordDiagnostic("scene:\(String(describing:phase))")
         if phase == .active {
             resume()
             if running { updateArmDisplay(at:now) }
@@ -216,7 +239,7 @@ final class MotionController: ObservableObject {
         else {
             // A Shortcut may arrive before the first active scene notification.
             // Preserve that waiting request, but cancel an unfinished calibration.
-            activation.leaveForeground()
+            if !canContinue { activation.leaveForeground() }
             if !activation.isPending { cancelShortcutActivation() }
             if canContinue && running {
                 // Keep the same subscription, baseline, and deadline while inactive.
@@ -224,14 +247,15 @@ final class MotionController: ObservableObject {
                 // Every sample is still checked for age and ordering.
                 updateArmDisplay(at:now)
             } else {
-                suspendCapture(activation.isPending ? "Opening control · hold still" : "Paused · raise wrist to resume")
+                suspendCapture(activation.isPending ? "Opening control · hold still" : "Paused · raise wrist to resume",
+                               reason:phase == .background ? .background : .activationInterrupted)
             }
         }
     }
     func navigationChanged() {
-        if navigationPath.last == .nowPlaying { pause("Paused for Now Playing") }
+        if navigationPath.last == .nowPlaying { pause("Paused for Now Playing",reason:.navigation) }
         else if navigationPath.last == .enrollment {
-            interactionRuntime.stop()
+            interactionRuntime.stop(reason:.enrollment)
             cancelShortcutActivation(); endVolume(lock:false); gestures.reset(); armed = false
             if !sessionActive { start() } else { resume() }
         } else {
@@ -244,7 +268,7 @@ final class MotionController: ObservableObject {
         // is already frontmost, clear pending control input without throwing away
         // the recording or calibrating/arming a control interaction.
         if navigationPath.last == .enrollment, enrollmentRecording, running, gestures.phase == .active {
-            interactionRuntime.stop()
+            interactionRuntime.stop(reason:.enrollment)
             cancelShortcutActivation(); gestures.reset(); armed = false; armRemaining = 0
             // Capture is training-only (no model). Preserve complete candidate
             // windows so both halves of a negative double touch are recorded.
@@ -260,7 +284,7 @@ final class MotionController: ObservableObject {
         activationTimeoutTask = Task { [weak self] in
             do { try await Task.sleep(for:.seconds(ShortcutActivation.timeout)) } catch { return }
             guard let self, self.activation.expire(at:ProcessInfo.processInfo.systemUptime) else { return }
-            self.stop("Activation timed out · activate again")
+            self.stop("Activation timed out · activate again",reason:.activationTimeout)
         }
         startSession()
     }
@@ -270,17 +294,20 @@ final class MotionController: ObservableObject {
         activationTimeoutTask?.cancel()
         activationTimeoutTask = nil
     }
-    func stop(_ message: String = "Session stopped") {
-        pause(); sessionActive = false; sessionEnd = nil; expiryTask?.cancel(); expiryTask = nil; status = message
+    func stop(_ message: String = "Session stopped", reason: InteractionEndReason = .explicitStop) {
+        pause(reason:reason); sessionActive = false; sessionEnd = nil; expiryTask?.cancel(); expiryTask = nil; status = message
         actionID = nil
     }
     func arm() {
         guard gestures.phase == .active else { return }
         activateFromShortcut()
     }
-    func endVolume(lock: Bool) {
-        guard volumeClaimed else { return }
-        interactionRuntime.stop()
+    func endVolume(lock: Bool, reason: InteractionEndReason? = nil) {
+        guard volumeClaimed, volume.state == .beginning || volume.state == .adjusting else { return }
+        pendingVolumeStopReason = reason ?? (lock ? .volumeLocked : .volumeStopped)
+        recordDiagnostic("volume-ending:\(pendingVolumeStopReason!.rawValue)")
+        // Retain the awake lease through the bounded final acknowledgement.
+        // didFinish or the existing runtime/session deadline releases it.
         volume.finish(lock:lock); gestures.reset(); armed = false; armRemaining = 0
         armExpiryTask?.cancel(); status = volume.message
     }
@@ -289,7 +316,7 @@ final class MotionController: ObservableObject {
         if enrollment.stage == .complete { enrollment = TapEnrollment() }
         if !sessionActive { start() }
         guard running else { return }
-        interactionRuntime.stop()
+        interactionRuntime.stop(reason:.enrollment)
         endVolume(lock:false); gestures.reset(); armed = false
         enrollmentRecording = true
         enrollmentDeadline = ProcessInfo.processInfo.systemUptime+enrollment.stage.duration
@@ -326,7 +353,7 @@ final class MotionController: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             let now = ProcessInfo.processInfo.systemUptime
             self.gestures.expireArm(at:now)
-            self.interactionRuntime.stop()
+            self.interactionRuntime.stop(reason:.armedExpired)
             if self.gestures.phase == .inactive {
                 self.pause("Armed window ended · raise wrist to resume")
             } else {
@@ -336,7 +363,7 @@ final class MotionController: ObservableObject {
     }
     private func updateArmDisplay(at now: Double) {
         armed = gestures.engine.isArmed(at:now)
-        if !armed && !volume.ownsMotion { interactionRuntime.stop() }
+        if !armed && !volume.ownsMotion && !activation.isPending { interactionRuntime.stop(reason:.armedExpired) }
         armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
         if volumeClaimed { status = volume.message }
         else if activation.isPending { status = "Hold still · preparing gestures" }
@@ -344,26 +371,64 @@ final class MotionController: ObservableObject {
         else { status = "Activate Wizardry or tap Arm" }
     }
     func testHaptic() { haptic(.click) }
+    func setReducedLuminance(_ value: Bool) {
+        guard reducedLuminance != value else { return }
+        reducedLuminance = value
+        recordDiagnostic(value ? "display-reduced" : "display-full")
+    }
+    private func diagnosticState() -> (scene: String, application: String) {
+        let application: String
+        switch WKApplication.shared().applicationState {
+        case .active: application = "active"
+        case .inactive: application = "inactive"
+        case .background: application = "background"
+        @unknown default: application = "unknown"
+        }
+        return (String(describing:gestures.phase),application)
+    }
+    private func recordDiagnostic(_ event: String, stop: InteractionEndReason? = nil) {
+        let state = diagnosticState(), app = WKApplication.shared()
+        diagnostics.record(.init(uptime:ProcessInfo.processInfo.systemUptime,event:event,scene:state.scene,
+                                 application:state.application,requested:interactionRuntime.isRequested,
+                                 enabled:app.isAutorotating,rotated:app.isAutorotated,reducedLuminance:reducedLuminance),stop:stop)
+        logger.info("\(event,privacy:.public) scene=\(state.scene,privacy:.public) app=\(state.application,privacy:.public) requested=\(self.interactionRuntime.isRequested) enabled=\(app.isAutorotating) reduced=\(self.reducedLuminance)")
+        publishDiagnostics(persist:true)
+    }
+    private func publishDiagnostics(persist: Bool = false) {
+        let state = diagnosticState(), app = WKApplication.shared()
+        let snapshot = InteractionDiagnosticsSnapshot(recordedAt:Date().timeIntervalSince1970,
+            scene:state.scene,application:state.application,requested:interactionRuntime.isRequested,
+            enabled:app.isAutorotating,rotated:app.isAutorotated,reducedLuminance:reducedLuminance,
+            motionHz:diagnostics.motionHz,rawHz:diagnostics.rawHz,sampleAgeMS:diagnostics.sampleAgeMS,
+            processingDelayMS:diagnostics.processingDelayMS,maximumGapMS:diagnostics.maximumGapMS,
+            confirmedUpdateHz:volume.confirmedUpdateHz,roundTripMS:volume.roundTripMilliseconds,
+            outstandingUpdates:volume.outstandingUpdateCount,lastStop:diagnostics.lastStop,events:diagnostics.events)
+        guard snapshot.isValid else { return }
+        interactionDiagnostics = snapshot; lastDiagnostics = ProcessInfo.processInfo.systemUptime
+        if persist, let data = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(data,forKey:"lastInteractionDiagnostics")
+        }
+        link.sendDiagnostics(snapshot)
+    }
     private func consume(_ motion: CapturedMotion) {
         let time = motion.time, now = ProcessInfo.processInfo.systemUptime
-        guard let end = sessionEnd, Date() < end else { stop("Session expired - start again"); return }
+        diagnostics.observe(sample:time,callback:motion.callbackTime,processed:now,rawRate:motion.rawHz)
+        guard let end = sessionEnd, Date() < end else { stop("Session expired - start again",reason:.runtimeExpired); return }
         if interactionRuntime.expireIfNeeded() { return }
         guard [time,motion.roll,motion.pitch,motion.yaw,now].allSatisfy(\.isFinite),
               motion.acceleration.isFinite, motion.rotation.isFinite, motion.gravity.isFinite,
               motion.attitude.normal != nil, time <= now, now-time <= 0.25,
               lastAccepted.map({time > $0}) ?? true else {
-            if volumeClaimed { endVolume(lock:false) }
+            if volumeClaimed { endVolume(lock:false,reason:now-time > 0.25 ? .staleMotion : .invalidMotion) }
             gestures.engine.interruptMotion(at:now); arbiter.interruptMotion(); return
         }
         if let previous = lastAccepted, time-previous > 0.25 {
-            if volumeClaimed { endVolume(lock:false) }
+            if volumeClaimed { endVolume(lock:false,reason:.motionGap) }
             gestures.engine.interruptMotion(at:now)
             arbiter.interruptMotion()
             cancelEnrollment("Recording interrupted - repeat this step")
         }
         lastAccepted = time; lastDelivery = now; lastMotion = motion
-        if firstSample == nil { firstSample = time }
-        samples += 1
         let acceleration = motion.acceleration.length, rotation = motion.rotation.length
         var gestureEvent: GestureEngine.Event?
         if navigationPath.last == .enrollment {
@@ -376,19 +441,17 @@ final class MotionController: ObservableObject {
                 gestures.calibrateAndArm(roll:motion.roll,pitch:motion.pitch,sampleTime:time,readyTime:now)
                 arbiter.calibrate(yaw:motion.yaw); viewingAngles = (motion.roll,motion.pitch)
                 capture?.reset(model:tapModel)
-                // Enable autorotation after calibration, before the ready haptic.
-                // A new activation owns a fresh, bounded interaction window.
-                guard interactionRuntime.start(until:gestures.engine.armedUntil,
-                                               canStart:gestures.phase == .active) else { return }
+                guard interactionRuntime.continueThroughArming(until:gestures.engine.armedUntil) else { return }
+                recordDiagnostic("ready-awake")
                 scheduleArmExpiry(); armed = true; status = "Ready - extend arm or make a gesture"
                 haptic(.success)
-            case .timedOut: stop("Activation timed out - activate again"); return
-            case .invalidMotion: stop("Invalid motion - activate again"); return
+            case .timedOut: stop("Activation timed out - activate again",reason:.activationTimeout); return
+            case .invalidMotion: stop("Invalid motion - activate again",reason:.invalidMotion); return
             case nil: break
             }
         } else if volumeClaimed {
             if volume.state == .adjusting {
-                if now < ignoreTapsUntil || arbiter.isViewing(yaw:motion.yaw) {
+                if now < ignoreTapsUntil {
                     tracker.freeze(at:time); pendingMotion = []
                 } else if tapFrozen {
                     pendingMotion.append(motion)
@@ -400,11 +463,7 @@ final class MotionController: ObservableObject {
                     }
                     pendingMotion = []; volume.setTarget(tracker.target)
                 }
-                if arbiter.isViewing(yaw:motion.yaw) {
-                    if viewingSince == nil { viewingSince = time }
-                    if time-(viewingSince ?? time) >= 0.25 { endVolume(lock:false) }
-                } else { viewingSince = nil }
-                if time-tracker.lastMovement >= 5 { endVolume(lock:false) }
+                if time-tracker.lastMovement >= 5 { endVolume(lock:false,reason:.inactivity) }
             }
         } else {
             gestures.expireArm(at:now)
@@ -416,12 +475,13 @@ final class MotionController: ObservableObject {
                 suppress = suppress || route != .legacy
                 if route == .enterVolume, !volume.ownsMotion {
                     volumeClaimed = true; armExpiryTask?.cancel(); armed = false; armRemaining = 0
-                    gestures.reset(); tapFrozen = false; viewingSince = nil
+                    gestures.reset(); tapFrozen = false; pendingVolumeStopReason = nil
                     // Keep autorotation through this live interaction, bounded
                     // by the outer session and a ten-minute interaction limit.
                     guard interactionRuntime.continueThroughVolume(
                         until:now + end.timeIntervalSinceNow) else { return }
                     volume.begin(revision:configuration.revision,phone:configuration.selectedProfileID == "phone")
+                    recordDiagnostic("volume-begin")
                 }
             }
             if !volumeClaimed {
@@ -442,7 +502,8 @@ final class MotionController: ObservableObject {
             rollDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.roll,from:$0.0)*180 / .pi} ?? 0
             pitchDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.pitch,from:$0.1)*180 / .pi} ?? 0
             if volumeMotion != nil { volumeMotion = tracker.feedback }
-            let elapsed = time-(firstSample ?? time); sampleRate = elapsed > 0 ? Double(samples-1)/elapsed : 0
+            sampleRate = diagnostics.motionHz
+            if now-lastDiagnostics >= 1 { publishDiagnostics() }
             lastDisplay = time
             if Date().timeIntervalSince1970 < link.streamUntil {
                 let a = motion.acceleration, r = motion.rotation, g = motion.gravity

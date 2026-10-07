@@ -16,13 +16,15 @@ final class PhoneStore: ObservableObject {
     @Published private(set) var history: [ActionLog] = []
     @Published private(set) var busy = false
     @Published private(set) var lastVolumeReply: VolumeReply?
+    @Published private(set) var watchDiagnostics: InteractionDiagnosticsSnapshot?
     let link = WatchLink()
     let home = HomeController()
     let spotify = SpotifyController()
     let phoneVolume = PhoneVolumeController()
     private var gate = CommandGate()
-    private var volumeGate = VolumeCommandGate()
-    private var volumeBusy = false
+    private var volumeCoordinator = VolumeCommandCoordinator()
+    private var volumeReplies: [UUID: (VolumeReply) -> Void] = [:]
+    private var volumeBusy: Bool { volumeCoordinator.isBusy }
     private var player: AVAudioPlayer?
     private var chimeGeneration = 0
     private let network = ComputerClient()
@@ -38,6 +40,7 @@ final class PhoneStore: ObservableObject {
         endpoint = UserDefaults.standard.string(forKey:"serverURL") ?? ""
         pairingToken = PairingKeychain.load()
         link.activated = { [weak self] in guard let self else { return }; self.link.sync(self.configuration) }
+        link.diagnosticsReceived = { [weak self] in self?.watchDiagnostics = $0 }
         link.framesReceived = { [weak self] frames in
             guard let self else { return }
             let clean = frames.filter { frame in
@@ -64,37 +67,60 @@ final class PhoneStore: ObservableObject {
         if UserDefaults.standard.bool(forKey:"homeEnabled") { home.connect() }
         link.volumeReceived = { [weak self] request,reply in
             guard let self else { reply(.failure("Phone unavailable",request:request)); return }
-            guard !self.volumeBusy, !self.busy,
-                  self.volumeGate.accept(request,configuration:self.configuration,now:Date().timeIntervalSince1970) else {
-                reply(.failure("Expired, busy, or invalid volume session",request:request)); return
-            }
-            self.volumeBusy = true
-            let phone = self.configuration.selectedProfileID == "phone"
-            Task {
-                let task: UIBackgroundTaskIdentifier = phone ? .invalid : UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
-                let result: VolumeReply
-                if request.revision != self.configuration.revision {
-                    result = .failure("Settings changed. Activate again.",request:request)
-                } else if phone {
-                    result = await self.phoneVolume.volume(request)
-                } else {
-                    result = await self.network.volume(request,endpoint:UserDefaults.standard.string(forKey:"serverURL") ?? "",token:PairingKeychain.load())
-                }
-                self.lastVolumeReply = result
-                if result.outcome == .failed { self.volumeGate.invalidate(now:Date().timeIntervalSince1970) }
+            guard !self.busy else { reply(.failure("Previous action still running",request:request)); return }
+            let ticket = UUID()
+            self.volumeReplies[ticket] = reply
+            let effects = self.volumeCoordinator.receive(request,ticket:ticket,configuration:self.configuration,now:Date().timeIntervalSince1970)
+            self.processVolume(effects)
+        }
+    }
+    private func processVolume(_ effects: [VolumeCommandCoordinator.Effect]) {
+        for effect in effects {
+            switch effect {
+            case let .reply(ticket,request,result):
+                guard let reply = volumeReplies.removeValue(forKey:ticket) else { continue }
+                // Superseded targets were never written and are not an actual
+                // volume acknowledgement for the phone's UI either.
+                if result.disposition != .superseded { lastVolumeReply = result }
                 if request.operation == .end || result.outcome == .failed {
-                    self.history.insert(.init(title:phone ? "Live iPhone volume" : "Live computer volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
-                    if self.history.count > 30 { self.history.removeLast() }
+                    history.insert(.init(title:"Live volume",result:.init(outcome:result.outcome,message:result.message)),at:0)
+                    if history.count > 30 { history.removeLast() }
                 }
-                self.volumeBusy = false
                 reply(result)
-                if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+            case let .execute(ticket,request,profileID):
+                let phone = profileID == "phone"
+                let endpoint = UserDefaults.standard.string(forKey:"serverURL") ?? ""
+                let token = PairingKeychain.load()
+                Task {
+                    let task: UIBackgroundTaskIdentifier = phone ? .invalid : UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
+                    defer { if task != .invalid { UIApplication.shared.endBackgroundTask(task) } }
+                    let result: VolumeReply
+                    guard self.volumeCoordinator.isCurrentExecution(ticket),
+                          request.revision == self.configuration.revision,
+                          profileID == self.configuration.selectedProfileID,
+                          Date().timeIntervalSince1970 < request.createdAt+1 else {
+                        let failure = VolumeReply.failure("Volume session changed or request expired; not retried",request:request)
+                        let effects = self.volumeCoordinator.complete(ticket:ticket,result:failure,now:Date().timeIntervalSince1970)
+                        self.processVolume(effects)
+                        return
+                    }
+                    if phone { result = await self.phoneVolume.volume(request) }
+                    else { result = await self.network.volume(request,endpoint:endpoint,token:token) }
+                    let effects = self.volumeCoordinator.complete(ticket:ticket,result:result,now:Date().timeIntervalSince1970)
+                    self.processVolume(effects)
+                }
             }
         }
+        if !volumeCoordinator.hasSession { phoneVolume.stop() }
+    }
+    private func invalidateVolume(_ message: String) {
+        phoneVolume.stop()
+        let effects = volumeCoordinator.invalidate(now:Date().timeIntervalSince1970,message:message)
+        processVolume(effects)
     }
     func saveConfiguration() {
         guard configuration.isValid else { return }
-        phoneVolume.stop(); volumeGate.invalidate(now:Date().timeIntervalSince1970)
+        invalidateVolume("Settings changed. Activate again.")
         configuration.revision = UUID().uuidString
         if let data = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(data,forKey:"wizardryConfiguration") }
         link.sync(configuration)
@@ -112,6 +138,7 @@ final class PhoneStore: ObservableObject {
         guard result.outcome != .failed else { pairingStatus = result.message; return }
         do {
             try PairingKeychain.save(token)
+            invalidateVolume("Receiver pairing changed. Activate again.")
             UserDefaults.standard.set(address,forKey:"serverURL")
             pairingToken = token
             endpoint = address
@@ -121,8 +148,7 @@ final class PhoneStore: ObservableObject {
     func test(_ binding: GestureBinding) { Task { _ = await perform(binding,deadline:Date().timeIntervalSince1970+5) } }
     func clearFrames() { frames = []; lastTelemetry = .distantPast }
     func suspendPhoneVolume() {
-        phoneVolume.stop()
-        if configuration.selectedProfileID == "phone" { volumeGate.invalidate(now:Date().timeIntervalSince1970) }
+        if configuration.selectedProfileID == "phone" { invalidateVolume("Keep Wizardry open on iPhone. Activate again.") }
     }
     private func perform(_ binding: GestureBinding, deadline: Double) async -> ActionResult {
         guard !busy, !volumeBusy, !phoneVolume.isActive, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
@@ -210,8 +236,10 @@ final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendabl
             guard let http = response as? HTTPURLResponse else { return .failure("Invalid receiver clock response") }
             guard http.statusCode == 200 else { return .failure(ReceiverFailure.message(status:http.statusCode,data:data,token:token)) }
             guard let body = try JSONSerialization.jsonObject(with:data) as? [String:Any],
-                  body["liveVolume"] as? Bool == true, let time = body["serverTime"] as? Double, time.isFinite else {
-                return .failure("Receiver needs an update: restart the latest receiver/server.py to support live volume and clock alignment.")
+                  body["liveVolume"] as? Bool == true,
+                  let version = body["liveVolumeProtocol"] as? Int, version >= 2,
+                  let time = body["serverTime"] as? Double, time.isFinite else {
+                return .failure("Update and restart receiver/server.py before using live volume (transport version 2 required).")
             }
             rememberClock(time,endpoint:base.absoluteString,token:token)
             return nil
@@ -248,8 +276,13 @@ final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendabl
             }
             let result = try JSONDecoder().decode(VolumeReply.self,from:data)
             guard result.sessionID == event.sessionID, result.sequence == event.sequence,
+                  result.outcome == .executed || result.outcome == .dryRun,
+                  result.disposition != .superseded,
                   let volume = result.volume, volume.isFinite, (0...1).contains(volume) else {
                 return .failure("Invalid volume acknowledgement",request:event)
+            }
+            guard event.operation != .begin || (result.transportVersion ?? 0) >= 2 else {
+                return .failure("Update and restart receiver/server.py before using live volume (transport version 2 required).",request:event)
             }
             if let time = result.serverTime { rememberClock(time,endpoint:base.absoluteString,token:token) }
             return result

@@ -20,6 +20,9 @@ final class InteractionRuntime {
     private(set) var isRunning = false
     var isRequested: Bool { driver != nil }
     var interrupted: ((String) -> Void)?
+    /// Capture evidence before releasing the platform aid, including expiry.
+    var willStop: ((InteractionEndReason) -> Void)?
+    var didStop: (() -> Void)?
 
     init(clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
          makeDriver: @escaping () -> any InteractionRuntimeDriver) {
@@ -48,7 +51,7 @@ final class InteractionRuntime {
         }
         next.didStop = { [weak self, weak next] message in
             guard let self, let next, self.driver === next else { return }
-            self.stop()
+            self.stop(reason:.systemStopped)
             self.interrupted?(message)
         }
         next.start()
@@ -59,6 +62,16 @@ final class InteractionRuntime {
     /// Its own lock, inactivity and interruption checks end this lease early.
     @discardableResult
     func continueThroughVolume(until sessionDeadline: Double) -> Bool {
+        continueInteraction(until:sessionDeadline)
+    }
+
+    /// Calibration and readiness share one lease, without a disable/enable gap.
+    @discardableResult
+    func continueThroughArming(until armDeadline: Double) -> Bool {
+        continueInteraction(until:armDeadline)
+    }
+
+    private func continueInteraction(until sessionDeadline: Double) -> Bool {
         guard !expireIfNeeded(), driver != nil, let maximumDeadline, sessionDeadline.isFinite else { return false }
         deadline = min(sessionDeadline, maximumDeadline)
         return !expireIfNeeded()
@@ -69,15 +82,17 @@ final class InteractionRuntime {
         guard let deadline else { return false }
         let now = clock()
         guard !now.isFinite || now >= deadline else { return false }
-        stop()
+        stop(reason:.runtimeExpired)
         interrupted?("Interaction ended · activate again")
         return true
     }
 
-    func stop() {
+    func stop(reason: InteractionEndReason = .replaced) {
         let previous = driver
+        if previous != nil { willStop?(reason) }
         driver = nil; deadline = nil; maximumDeadline = nil; isRunning = false
         previous?.didStart = nil; previous?.didStop = nil
         previous?.invalidate()
+        if previous != nil { didStop?() }
     }
 }

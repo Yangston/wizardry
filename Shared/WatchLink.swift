@@ -10,6 +10,7 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
     var gestureReceived: ((GestureRequest, @escaping (ActionResult) -> Void) -> Void)?
     var volumeReceived: ((VolumeRequest, @escaping (VolumeReply) -> Void) -> Void)?
     var framesReceived: (([MotionFrame]) -> Void)?
+    var diagnosticsReceived: ((InteractionDiagnosticsSnapshot) -> Void)?
     var activated: (() -> Void)?
     private(set) var streamUntil = 0.0
     private var telemetryInFlight = false
@@ -71,6 +72,13 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
             Task { @MainActor in completion(.failure(error.localizedDescription,request:request)) }
         })
     }
+    /// Best-effort state evidence, including the final transition after capture
+    /// stops. Never enters a background transfer queue or retries.
+    func sendDiagnostics(_ snapshot: InteractionDiagnosticsSnapshot) {
+        guard Date().timeIntervalSince1970 < streamUntil, snapshot.isValid, let session, session.isReachable,
+              let data = try? JSONEncoder().encode(snapshot) else { return }
+        session.sendMessage(["interactionDiagnostics":data],replyHandler:nil,errorHandler:{ _ in })
+    }
     private func updateStatus() {
         reachable = session?.isReachable == true
         #if os(iOS)
@@ -115,6 +123,10 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
         }
         reply?(["ok":true])
         #else
+        if let data = message["interactionDiagnostics"] as? Data, data.count <= 32_768,
+           let snapshot = try? JSONDecoder().decode(InteractionDiagnosticsSnapshot.self,from:data), snapshot.isValid {
+            diagnosticsReceived?(snapshot); reply?(["ok":true]); return
+        }
         if let data = message["volume"] as? Data, let event = try? JSONDecoder().decode(VolumeRequest.self,from:data) {
             let respond: (VolumeReply)->Void = { result in
                 if let encoded = try? JSONEncoder().encode(result) { reply?(["volumeReply":encoded]) }

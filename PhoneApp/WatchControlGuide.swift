@@ -119,6 +119,21 @@ struct WatchControlCard: View {
                 if let reply = store.lastVolumeReply, reply.outcome == .failed {
                     Text("Volume: "+reply.message).font(.caption).foregroundStyle(.orange)
                 }
+                if let diagnostic = store.watchDiagnostics {
+                    DisclosureGroup("Watch awake diagnostics") {
+                        VStack(alignment:.leading,spacing:6) {
+                            Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time) · \(diagnostic.scene) / \(diagnostic.application)")
+                            Text("Display \(diagnostic.reducedLuminance ? "reduced" : "full") · autorotation requested \(diagnostic.requested ? "yes" : "no"), enabled \(diagnostic.enabled ? "yes" : "no")")
+                            Text(String(format:"Motion %.0f Hz · raw %.0f Hz · sample age %.0f ms · processing %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.sampleAgeMS,diagnostic.processingDelayMS))
+                            Text(String(format:"Confirmed %.1f Hz · reply %.0f ms · %d updates in flight",diagnostic.confirmedUpdateHz,diagnostic.roundTripMS,diagnostic.outstandingUpdates))
+                            Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
+                            Text("Confirmation rate is not measured audio-application rate. Display state still needs physical observation.").foregroundStyle(.secondary)
+                            ForEach(Array(diagnostic.events.suffix(8).enumerated()),id:\.offset) { _,event in
+                                Text(String(format:"%.2f",event.uptime)+" · "+event.event+" · enabled "+(event.enabled ? "yes" : "no"))
+                            }
+                        }.font(.caption2).textSelection(.enabled)
+                    }
+                }
             }.padding(18).background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:20))
         }
     }
@@ -154,7 +169,7 @@ struct VolumeFlowGuide: View {
                 step("2", "Extend", "Extend your arm so z / yaw changes about 90° from the ready pose. Hold briefly until the volume-entry haptic.")
                 step("3", "Adjust live", profileID == "phone" ? "Keep Wizardry's native volume slider visible on iPhone. Raise/lower in short vertical strokes to change media volume live, starting at its current level. The native-slider bridge is experimental." : "Raise your hand to increase computer volume; lower it to decrease. Use short vertical strokes with pauses. Start at the computer's current volume.")
                 step("4", "Lock", "Touch thumb and index finger together once after enrollment, or press Lock volume on the Watch. Wait for the locked acknowledgement.")
-                Text("Volume stops after five seconds without movement, returning to the viewing yaw, or interrupted sensing. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
+                Text("Rotate freely while adjusting; returning to the viewing yaw does not stop volume. Lock when done. Five seconds without movement or interrupted sensing also stops it. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 step("2", "Make your wrist action", "Use the selected profile's twist, tilt or shake mapping within the armed window. Return to neutral between actions.")
