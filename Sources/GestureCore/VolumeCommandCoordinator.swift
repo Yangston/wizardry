@@ -45,10 +45,11 @@ struct VolumeCommandCoordinator {
         closed = closed.filter { now-$0.value < 1800 }
         seen = seen.filter { now-$0.value < 30 }
         var effects: [Effect] = []
-        if let session, session.revision != configuration.revision || session.profileID != configuration.selectedProfileID {
+        if let session, !configuration.allowsControl || session.revision != configuration.revision || session.profileID != configuration.selectedProfileID {
             effects += invalidate(now:now,message:"Settings changed. Activate again.")
         }
-        guard request.isValid, fresh(request,now:now), request.revision == configuration.revision,
+        guard configuration.allowsControl, request.isValid, fresh(request,now:now), request.revision == configuration.revision,
+              request.profileID.map({$0 == configuration.selectedProfileID}) ?? true,
               configuration.supportsLiveVolume, seen[request.id] == nil,
               closed[request.sessionID] == nil else {
             return effects + [reply(ticket,request,.failure("Expired, duplicate, or invalid volume session",request:request))]

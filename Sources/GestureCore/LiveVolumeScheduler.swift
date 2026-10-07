@@ -28,6 +28,7 @@ struct LiveVolumeScheduler {
     private(set) var statistics = Statistics()
     private var sessionID: UUID?
     private var revision = ""
+    private var profileID: String?
     private var sequence = 0
     private var appliedSequence = -1
     private var pending: [UUID:Pending] = [:]
@@ -46,9 +47,10 @@ struct LiveVolumeScheduler {
         return Double(recent.count-1)/max(last-first,now-first)
     }
 
-    mutating func begin(revision: String, sessionID: UUID = UUID()) {
+    mutating func begin(revision: String, sessionID: UUID = UUID(), profileID: String? = nil) {
         self = Self()
         self.revision = revision; self.sessionID = sessionID; phase = .beginning
+        self.profileID = profileID
     }
 
     mutating func setTarget(_ value: Double) {
@@ -88,7 +90,7 @@ struct LiveVolumeScheduler {
         if operation != .begin { sequence += 1 }
         let request = VolumeRequest(sessionID:sessionID,revision:revision,sequence:sequence,
                                     createdAt:wallTime,operation:operation,
-                                    target:operation == .begin ? nil : latestTarget)
+                                    target:operation == .begin ? nil : latestTarget,profileID:profileID)
         pending[request.id] = .init(request:request,sentAt:now)
         lastSend = now
         if operation != .begin { sentTarget = latestTarget }

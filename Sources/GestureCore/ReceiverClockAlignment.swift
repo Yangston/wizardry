@@ -6,10 +6,10 @@ import Foundation
 struct ReceiverClockAlignment {
     let serverTime: Double
     let receivedAt: Double
-    func translate(createdAt: Double, now: Double) -> Double? {
-        guard [serverTime,receivedAt,createdAt,now].allSatisfy(\.isFinite),
+    func translate(createdAt: Double, now: Double, maximumAge: Double = 1) -> Double? {
+        guard [serverTime,receivedAt,createdAt,now,maximumAge].allSatisfy(\.isFinite), (0...5).contains(maximumAge),
               now >= receivedAt, now-receivedAt <= 30,
-              createdAt <= now+0.1, now-createdAt <= 1 else { return nil }
+              createdAt <= now+0.1, now-createdAt <= maximumAge else { return nil }
         let translated = createdAt + (serverTime-receivedAt)
         return translated.isFinite ? translated : nil
     }

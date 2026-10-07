@@ -7,7 +7,7 @@ struct MotionFeedbackCard: View {
         TimelineView(.periodic(from:.now,by:0.25)) { context in
             let frame = store.frames.last
             let snapshot = frame?.control
-            let feedback = snapshot?.volumeMotion
+            let feedback = snapshot?.twistVolume
             let fresh = frame.map {let age = context.date.timeIntervalSince1970-$0.time; return age >= -0.1 && age < 2 && context.date.timeIntervalSince(store.lastTelemetry) < 2} ?? false
             VStack(alignment:.leading,spacing:12) {
                 HStack {
@@ -18,10 +18,10 @@ struct MotionFeedbackCard: View {
                 MotionAxisMeter(title:"Twist",degrees:(frame?.roll ?? 0)*180 / .pi)
                 MotionAxisMeter(title:"Tilt",degrees:(frame?.pitch ?? 0)*180 / .pi,tint:.cyan)
                 MotionAxisMeter(title:"Yaw",degrees:(snapshot?.relativeYaw ?? 0)*180 / .pi,tint:.orange)
-                Text("Angles from the ready pose · extend yaw to ±90°").font(.caption2).foregroundStyle(.secondary)
+                Text("Angles from ready pose · turn past ±55° to enter").font(.caption2).foregroundStyle(.secondary)
                 HStack {
-                    Label(fresh && snapshot?.phase == .adjustingVolume ? movement(feedback?.velocity ?? 0) : "Raise ↑ / lower ↓",
-                          systemImage:"arrow.up.arrow.down").font(.subheadline.bold())
+                    Label(fresh && snapshot?.phase == .adjustingVolume ? movement(feedback?.angularVelocity ?? 0) : "Twist like a volume knob",
+                          systemImage:"dial.low.fill").font(.subheadline.bold())
                     Spacer()
                     if let target = snapshot?.requestedVolume {
                         Text(String(format:"%.1f%%",target*100)).font(.title2.monospacedDigit())
@@ -33,7 +33,7 @@ struct MotionFeedbackCard: View {
                     Text(String(format:"Started %.0f%% · change %+.1f percentage points",
                                 feedback.startingVolume*100,((snapshot?.requestedVolume ?? feedback.startingVolume)-feedback.startingVolume)*100))
                         .font(.caption).monospacedDigit()
-                    Text(String(format:"Estimated control travel %+.1f cm · speed %+.1f cm/s",feedback.travel*100,feedback.velocity*100))
+                    Text(String(format:"Knob twist %+.1f° · angular velocity %+.2f rad/s",feedback.twistRadians*180 / .pi,feedback.angularVelocity))
                         .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Chart {
@@ -55,7 +55,7 @@ struct MotionFeedbackCard: View {
                     .chartForegroundStyleScale(["Requested":Color.green,"Acknowledged":Color.cyan]).frame(height:110)
                     .overlay {
                         if !store.frames.contains(where:{$0.control?.requestedVolume != nil}) {
-                            Text("Extend after the ready haptic to start volume").font(.caption).foregroundStyle(.secondary)
+                            Text("Turn past ±55° after the ready haptic, then twist to adjust").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 if snapshot?.dryRun == true { Text("Dry run · computer audio is unchanged").font(.caption).foregroundStyle(.orange) }
@@ -67,7 +67,7 @@ struct MotionFeedbackCard: View {
         }
     }
     private func movement(_ velocity: Double) -> String {
-        velocity > 0.01 ? "Raising ↑ · volume up" : velocity < -0.01 ? "Lowering ↓ · volume down" : "Holding volume"
+        velocity > 0.03 ? "Twisting + · volume up" : velocity < -0.03 ? "Twisting − · volume down" : "Holding volume"
     }
 }
 
@@ -128,14 +128,14 @@ struct WatchControlCard: View {
     @ViewBuilder private func yawReadout(_ snapshot: WatchControlSnapshot) -> some View {
         if let yaw = snapshot.relativeYaw {
             let degrees = yaw*180 / .pi
-            let inZone = (70...110).contains(abs(degrees))
+            let inZone = abs(degrees) >= 55
             HStack(alignment:.firstTextBaseline) {
                 Text("Yaw change from ready pose").font(.caption)
                 Spacer()
                 Text(String(format:"%+.0f°",degrees)).font(.title2.monospacedDigit()).accessibilityIdentifier("yaw-change-value")
             }
-            ProgressView(value:min(1,abs(degrees)/90)).tint(inZone ? .green : .purple)
-            Text("Aim for ±90° · entry zone 70–110° · hold briefly").font(.caption2).foregroundStyle(.secondary)
+            ProgressView(value:min(1,abs(degrees)/55)).tint(inZone ? .green : .purple)
+            Text("Entry at ±55° · no extra hold · then twist like a knob").font(.caption2).foregroundStyle(.secondary)
         } else { Text("Yaw reference: waiting for ready haptic").font(.caption).foregroundStyle(.secondary) }
     }
     private func volumeNumber(_ title: String, _ value: Double) -> some View {
@@ -182,17 +182,17 @@ struct VolumeFlowGuide: View {
     private var volume: Bool { ["computer","phone"].contains(profileID) }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Label(volume ? "Activate · Extend · Adjust · Lock" : "Activate · Act",systemImage:"sparkles").font(.headline)
+            Label(volume ? "Activate · Turn · Twist · Lock" : "Activate · Act",systemImage:"sparkles").font(.headline)
             step("1", "Activate", "Wake the Watch and double-touch your fingers to run Activate Wizardry. Hold still looking at it for the ready haptic. Arm on the Watch also works.")
             if volume {
-                step("2", "Extend", "Extend your arm so z / yaw changes about 90° from the ready pose. Hold briefly until the volume-entry haptic.")
-                step("3", "Adjust live", profileID == "phone" ? "Keep Wizardry's native volume slider visible on iPhone. Raise/lower in short vertical strokes to change media volume live, starting at its current level. The native-slider bridge is experimental." : "Raise your hand to increase computer volume; lower it to decrease. Use short vertical strokes with pauses. Start at the computer's current volume.")
+                step("2", "Enter", "Turn away from the ready pose until wrapped yaw reaches 55° in either direction. There is no extra hold; wait for the volume-entry haptic.")
+                step("3", "Twist to adjust", profileID == "phone" ? "Keep Wizardry's native volume slider visible on iPhone. Twist your wrist like a knob, starting at the current media volume. Compare requested and actual system readback; the native-slider bridge is experimental." : "Twist your wrist like a volume knob in either direction, starting from the computer's current volume. Hold the twist to keep that level.")
                 step("4", "Lock", "Touch thumb and index finger together once after enrollment, or press Lock volume on the Watch. Wait for the locked acknowledgement.")
-                Text("Rotate freely and pause while adjusting; returning to the viewing yaw or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
+                Text("Looking back at the Watch or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust. Knob direction and custom tap recognition still need physical-watch validation.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 step("2", "Make your wrist action", "Use the selected profile's twist, tilt or shake mapping within the armed window. Return to neutral between actions.")
-                Text("Choose Computer or Phone to use live arm-height volume control.").font(.caption).foregroundStyle(.secondary)
+                Text("Choose Computer or Phone to use live wrist-twist volume control.").font(.caption).foregroundStyle(.secondary)
             }
         }.padding(18).background(.purple.opacity(0.1),in:RoundedRectangle(cornerRadius:20))
     }

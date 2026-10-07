@@ -104,7 +104,7 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(missing.exception.code, 404)
             with self.assertRaises(HTTPError) as post:
                 urlopen(Request(url + "/status", data=b"{}"), timeout=2)
-            self.assertEqual(post.exception.code, 501)
+            self.assertEqual(post.exception.code, 403)
         finally:
             server.shutdown()
             server.server_close()

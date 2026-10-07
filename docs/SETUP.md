@@ -29,6 +29,12 @@ If TestFlight shows that specific message:
 
 This is a one-time installation-order migration; subsequent paired-app builds update normally. If the expected build is not selected, use TestFlight's Previous Builds picker. Do not infer an archive defect from the old Watch installation alone; inspect the build metadata and the exact device error.
 
+## Connect a control target
+
+Connect **Computer** or **Phone** from the Watch, or select the intended target and use **Connect Watch** on iPhone. Watch commands always pass through the paired iPhone, including Computer commands. Only one command target is active. Computer requires the saved receiver address/token; live Phone volume requires the foreground iPhone app and visible native slider. Select Home on iPhone when using configured Home actions.
+
+**Disconnect** stops Wizardry command control and invalidates the active interaction. It does not unpair Apple Watch/Bluetooth, delete receiver credentials, or revoke Spotify authorization. Reconnect the intended target, then activate afresh. Connection status reports Wizardry's control state and target acknowledgement, not a promise that every future output action will succeed. Merely editing another profile does not activate it.
+
 ## AssistiveTouch launch
 
 The intended flow is **raise wrist → double finger touch → hold still → ready haptic → wrist action**, with no screen tap after setup. Install the updated app on **both iPhone and Apple Watch** first and open each once for setup and permissions.
@@ -41,6 +47,8 @@ The intended flow is **raise wrist → double finger touch → hold still → re
 
 The action is exposed in both apps so it can be configured on iPhone, but **execute it on Apple Watch**. Running it on iPhone displays an instruction to use the watch; it does not remotely launch the watch app. If the action is missing, confirm both updated apps are installed and have been opened, then recheck Shortcuts discovery. Do not substitute a phone-only Open App shortcut.
 
+Assign AssistiveTouch **single finger touch to None**. Wizardry's optional personalized single-touch recognizer owns that input; before enrollment, **Lock volume** remains available onscreen.
+
 Wizardry waits for 250 ms of low acceleration and rotation before calibrating the current wrist position and starting the configured armed window. Repeating the shortcut starts a fresh 30-minute session and restarts calibration. Launch motion cannot trigger a mapped action. A ready haptic means gesture input is ready, not that the iPhone, music player, computer, or Home target has acknowledged an action.
 
 If launch or calibration takes ten seconds, Wizardry cancels the activation and asks you to activate again. An inactive transition during calibration preserves the request only with its existing autorotation lease and fresh motion samples; backgrounding, stopping the session, changing settings, or losing the motion sensor cancels it. Raising your wrist later does not replay a canceled request. When Wizardry is already frontmost, its Arm button remains available.
@@ -51,11 +59,13 @@ After the ready haptic, brief dimming preserves the **remaining** armed time and
 
 This experimental build enables temporary autorotation as foreground calibration starts and retains the same lease through readiness, the armed countdown, live volume, and its final acknowledgement. Apple documents this as keeping the interface awake when the wrist flips to show it to another viewer; the interface may flip during your gesture. The app limit is ten minutes from calibration, bounded by the outer session. Idle screens and enrollment do not enable it. Expiry, disarm, failure, Now Playing, settings changes, explicit stopping, or backgrounding releases it; a wrist raise cannot re-enable an expired interaction. No extended runtime session or self-care capability is used. See [Apple's autorotation documentation](https://developer.apple.com/documentation/watchkit/wkapplication/isautorotating).
 
-The release requirement is for the **display itself to remain awake during movement, backward tilt, and stationary pauses in live volume**. Dimming with continuing volume control is not a substitute. The user reported rotation working in **0.2.0 (15.1)**; stationary holds, full pose coverage, and battery checks remain pending. The autorotation request does not establish a guarantee for every orientation or indefinite use. Use **Awake diagnostics** on Watch/iPhone to correlate requested/read-back autorotation, reduced luminance, lifecycle state, sample timing, acknowledgement cadence, and stop reasons with what the display actually does. The Watch retains a bounded 48-event diagnostic history.
+The release requirement is for the **display itself to remain awake during movement, backward tilt, and stationary pauses in live volume**. Dimming with continuing volume control is not a substitute. The user reported rotation working in **0.2.0 (15.1)**. Build **16.1** added stationary-hold behavior, but physical holds, full pose coverage, and battery checks remain pending. The autorotation request does not establish a guarantee for every orientation or indefinite use. Use **Awake diagnostics** on Watch/iPhone to correlate requested/read-back autorotation, reduced luminance, lifecycle state, sample timing, acknowledgement cadence, and stop reasons with what the display actually does. The Watch retains a bounded 48-event diagnostic history.
 
-Holding still during live volume retains the same session and autorotation lease; raising/lowering can resume without reactivation. An unchanged-volume heartbeat runs once a second. The six-second phone/receiver missing-request watchdogs, stale sensing/transport failures, manual lock, explicit interruptions, and the ten-minute cap remain enforced. Physically test a 10–30-second hold for an awake display and constant volume before accepting this stationary behavior.
+Holding still during live volume retains the same session and autorotation lease; twisting resumes adjustment without reactivation. There is no five-second stationary auto-exit. An unchanged-volume heartbeat runs once a second. The six-second phone/receiver missing-request watchdogs, stale sensing/transport failures, manual lock, explicit disconnect/stop, and the ten-minute cap remain enforced. Physically test a 10–30-second hold for an awake display and constant volume before accepting this stationary behavior.
 
-For smooth live volume, install both updated apps and restart the updated Computer receiver. Transport v2 permits up to 50 update starts/s and four outstanding Watch updates; the phone executes one write and keeps only the newest waiting target. Receiver capability is checked before adjustment. Actual applied-output cadence requires the measurements in [LIVE_VOLUME.md](LIVE_VOLUME.md); confirmed acknowledgement Hz is not applied-output Hz. Relative yaw still selects volume entry, but crossing the viewing yaw during adjustment no longer freezes or stops it.
+For the volume knob, extend to **55° absolute wrapped yaw** from the ready pose. Either direction enters on the first fresh sample without additional settling or an upper-angle cutoff. The current output volume and roll anchor adjustment: positive twist increases, negative twist decreases, and a 90° turn changes volume by 50 percentage points. Use small turns; wrapped deltas handle ±180° crossings. Raising/lowering is no longer the volume input, and crossing the viewing yaw does not exit adjustment.
+
+Install both updated apps and restart the updated Computer receiver. Transport v2 permits up to 50 update starts/s and four outstanding Watch updates; the phone executes one write and keeps only the newest waiting target. Receiver capability is checked before adjustment. Actual applied-output cadence requires the measurements in [LIVE_VOLUME.md](LIVE_VOLUME.md); confirmed acknowledgement Hz is not applied-output Hz.
 
 On supported watches, **Settings → Gestures → Wrist Flick → Off** may prevent rolls from being interpreted as the system's dismissal gesture. See [Apple's Wrist Flick guide](https://support.apple.com/guide/watch/use-gestures-for-notifications-and-alerts-apd8bcbaa778/27/watchos/27).
 
@@ -100,12 +110,22 @@ Both Info.plists explicitly bind `CFBundleVersion` to `$(CURRENT_PROJECT_VERSION
 - **Apple Home:** connect from iPhone Setup; allow access and select devices/scenes. Existing Matter devices in Home use that pairing.
 - **Computer:** [receiver setup](../receiver/README.md), then save address/token in the phone. Credentials use the iPhone Keychain.
 - **Spotify:** create a developer app with Web API + iOS, bundle `com.yangston.wizardry`, redirect `wizardry-spotify://callback`. Register/allowlist the owner. Wizardry uses authorization code with PKCE, with only a public Client ID, never a client secret. Premium is required for playback control. API/device volume limitations remain explicit in the app.
-- **Live iPhone volume:** select Phone on Control and leave Wizardry's native volume slider visible. Activate/extend/raise-lower/lock on the Watch works through an experimental native-slider bridge with system-volume readback, without a Shortcut or computer receiver. Both updated apps are required. It needs physical-iPhone testing; locked/background phone control is unavailable. See [setup and checks](LIVE_VOLUME.md#live-iphone-volume-experimental).
+- **Live iPhone volume:** connect Phone and leave Wizardry's native slider visible. Activate, extend past 55° yaw, twist, then lock. The bridge hosts an ordinary `MPVolumeView` instead of subclassing it, and requires actual audio-session readback before acknowledgement. This implementation fix remains experimental until physical-iPhone validation; no Shortcut or receiver is required, and locked/background phone control is unavailable. See [setup and checks](LIVE_VOLUME.md#live-iphone-volume-experimental).
 - **Volume Shortcuts:** existing discrete twist mappings use user-created `Wizardry Volume Up` and `Wizardry Volume Down`; only launched while Wizardry is foreground on iPhone. Native volume/Now Playing remain available.
 
 HomeKit and local network prompts, music authorization, Spotify login, actual Watch gestures, and accessory actions must be verified on hardware. No sensor data is uploaded by the app to a cloud service.
 
 The Spotify developer app is now registered, its iOS bundle and redirect are saved, the owner's Spotify account is allowlisted, and the public Client ID is configured in the TestFlight environment. The user still completes Spotify authorization in the iPhone app. No client secret is embedded or required.
+
+## Computer studio setup
+
+1. Start the updated paired receiver and open its local dashboard. It provides **Volume**, **Live sensors**, **Record movements**, and **Map movements** pages; see the [receiver guide](../receiver/README.md).
+2. Enable **Computer studio** on the foreground iPhone. Keep Wizardry visible on the Watch. Choose **Start sensors** on the computer. This monitoring subscription is independent of the command target; it does not switch Phone control to Computer or permit commands to both.
+3. In **Record movements**, create a named movement and select **Record example**. Stay still while **Preparing**. Start the movement only after Watch confirmation and **Recording — move now**. Watch gesture actions are disabled during capture.
+4. Choose **Stop & save**, or **Cancel** to discard. Takes have a 60-second limit and quality/interruption indicators. Confirmed recording samples are saved locally under `receiver/data/`; they are not uploaded to a cloud service.
+5. **Map movements** stores custom movement/action labels for later training. Saving examples or labels does not enable trained recognition. Existing Computer/Phone discrete mappings can be edited separately with the iPhone's current-revision acknowledgement; Home target configuration stays on iPhone.
+
+Turning off Computer studio or losing its foreground iPhone relay stops capture/monitoring; inspect interrupted-take quality before keeping an example. Dashboard access stays on the computer's loopback interface, and browser pages never receive the pairing token. Do not treat a saved recording or passing synthetic test as validated recognition.
 
 ## Known delivery history
 

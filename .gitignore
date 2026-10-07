@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 .env
 .pairing-token
+receiver/data/
 *.p8
 *.p12
 *.pem

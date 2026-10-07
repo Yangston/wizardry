@@ -24,7 +24,7 @@ final class PhoneUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Wizardry"].waitForExistence(timeout:15))
         XCTAssertTrue(app.staticTexts["Live Watch status"].exists)
-        XCTAssertTrue(app.staticTexts["Activate · Extend · Adjust · Lock"].exists)
+        XCTAssertTrue(app.staticTexts["Activate · Turn · Twist · Lock"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "2.5 seconds")).firstMatch.exists)
         capture("01-control")
         let tapSetup = app.buttons["Single finger tap setup"].firstMatch

@@ -16,7 +16,7 @@ struct PhoneRootView: View {
     private enum Tab: Hashable { case control, motions, live, setup }
     @State private var tab = Tab.control
     @Environment(\.scenePhase) private var scenePhase
-    private var streamsMotion: Bool { scenePhase == .active && (tab == .control || tab == .live) }
+    private var streamsMotion: Bool { scenePhase == .active && store.configuration.allowsControl && (tab == .control || tab == .live) }
     var body: some View {
         TabView(selection:$tab) {
             ControlDashboard(store:store,link:store.link).tabItem { Label("Control",systemImage:"wand.and.stars") }.tag(Tab.control)
@@ -32,8 +32,10 @@ struct PhoneRootView: View {
             }
         }
         .onDisappear { store.link.stopStream() }
-        .onChange(of:scenePhase) { _,phase in
+        .onChange(of:scenePhase,initial:true) { _,phase in
+            store.studio.setForeground(phase == .active)
             if phase != .active { store.suspendPhoneVolume() }
+            else { store.phoneVolume.refreshReadiness() }
         }
         .onReceive(store.link.$reachable.removeDuplicates()) { reachable in
             if reachable && streamsMotion { store.link.requestStream() }
@@ -52,14 +54,15 @@ struct ControlDashboard: View {
                         Image(systemName:"wand.and.stars").font(.system(size:40)).foregroundStyle(.purple)
                         Text("Magic at a wave.").font(.largeTitle.bold())
                         Text("A deliberate motion. Your chosen action.").foregroundStyle(.secondary)
-                        Label(link.status,systemImage:link.reachable ? "applewatch.radiowaves.left.and.right" : "applewatch")
+                        Label("iPhone–Watch link: \(link.status)",systemImage:link.reachable ? "applewatch.radiowaves.left.and.right" : "applewatch")
                             .font(.subheadline).foregroundStyle(link.reachable ? .green : .secondary)
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(22)
                         .background(LinearGradient(colors:[.purple.opacity(0.22),.indigo.opacity(0.08)],startPoint:.topLeading,endPoint:.bottomTrailing),in:RoundedRectangle(cornerRadius:24))
-                    Picker("Control profile",selection:$store.configuration.selectedProfileID) {
+                    Picker("Control profile",selection:Binding(get:{store.configuration.selectedProfileID},set:{store.selectProfile($0)})) {
                         ForEach(store.configuration.profiles) { Text($0.name).tag($0.id) }
-                    }.pickerStyle(.segmented).onChange(of:store.configuration.selectedProfileID) { _,_ in store.saveConfiguration() }
+                    }.pickerStyle(.segmented)
                     if store.configuration.selectedProfileID == "phone" { PhoneVolumeCard(store:store) }
+                    WatchConnectionCard(store:store,link:link)
                     MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
                     DisclosureGroup("All motion axes") {
@@ -84,7 +87,7 @@ struct ControlDashboard: View {
                                 }
                                 Spacer(); Image(systemName:"play.circle.fill").font(.title2)
                             }.padding().background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:16))
-                        }.buttonStyle(.plain).disabled(store.busy)
+                        }.buttonStyle(.plain).disabled(store.busy || store.studioRecording)
                     }
                     Text("Recent actions").font(.title2.bold())
                     if store.history.isEmpty { Text("Acknowledged actions and errors appear here.").foregroundStyle(.secondary) }
@@ -121,7 +124,7 @@ struct MotionMappings: View {
                     Section("Other wrist actions") {
                         ForEach(store.configuration.profiles[index].bindings) { binding in
                             NavigationLink {
-                                MappingEditor(draft:binding,home:store.home) { updated in
+                                MappingEditor(draft:binding,home:store.home,profileID:editProfile) { updated in
                                     if let b = store.configuration.profiles[index].bindings.firstIndex(where:{$0.id == updated.id}) {
                                         store.configuration.profiles[index].bindings[b] = updated; store.saveConfiguration()
                                     }
@@ -137,10 +140,10 @@ struct MotionMappings: View {
                 }
                 if ["computer","phone"].contains(editProfile) {
                     Section(editProfile == "phone" ? "Live iPhone volume · experimental" : "Live computer volume") {
-                        Text("Extend your arm so z / yaw changes about 90° from the ready pose. After the entry haptic, raise/lower vertically in short strokes with pauses. A learned single finger touch or Lock volume ends adjustment.").font(.caption)
+                        Text("Turn away from the ready pose until absolute yaw change reaches 55°. Entry needs no extra hold. After the entry haptic, twist your wrist like a volume knob. A learned single finger touch or Lock volume ends adjustment.").font(.caption)
                         Text("Extension takes priority over the discrete mappings above. While adjusting volume, other wrist actions are paused.").font(.caption).foregroundStyle(.secondary)
                         if editProfile == "phone" {
-                            Text("Keep Wizardry open on iPhone with its native volume slider visible. Raises/lowers change media volume immediately; no Shortcut is used. Physical-device testing is required.").font(.caption)
+                            Text("Keep Wizardry open on iPhone with its native volume slider visible. Wrist twists change media volume from its current level; no Shortcut is used. Check requested and actual readback values on physical hardware.").font(.caption)
                         }
                         NavigationLink("Single finger tap setup") { FingerTapSetupGuide() }
                     }
@@ -169,6 +172,7 @@ struct MotionMappings: View {
 struct MappingEditor: View {
     @State var draft: GestureBinding
     @ObservedObject var home: HomeController
+    var profileID: String
     var save: (GestureBinding)->Void
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -176,8 +180,17 @@ struct MappingEditor: View {
             Section { Text(draft.gesture.instruction); Toggle("Enabled",isOn:$draft.enabled) }
             Section("Action") {
                 Picker("Action",selection:$draft.action) {
-                    ForEach(ActionKind.allCases) { Text($0.title).tag($0) }
+                    // Keep an old incompatible value visible without silently
+                    // changing it; new choices belong to this selected target.
+                    if !draft.action.isAllowed(inProfile:profileID) {
+                        Text("\(draft.action.title) · choose a target-compatible action").tag(draft.action)
+                    }
+                    ForEach(ActionKind.allCases.filter {$0.isAllowed(inProfile:profileID)}) { Text($0.title).tag($0) }
                 }.pickerStyle(.navigationLink)
+                if !draft.action.isAllowed(inProfile:profileID) {
+                    Text("This saved mapping controls another target and cannot execute in this profile. Select a compatible action before saving.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if draft.action == .shortcut {
                     TextField("Exact Shortcut name",text:$draft.shortcutName).autocorrectionDisabled()
                     Text("Requires Wizardry open on iPhone. iOS opens Shortcuts; completion is not reported. For volume, create Wizardry Volume Up and Wizardry Volume Down with Get Device Details → Current Volume, Calculate ±0.06, and Set Volume.").font(.caption)
@@ -203,7 +216,9 @@ struct MappingEditor: View {
             }
         }.navigationTitle(draft.gesture.title)
             .onChange(of:draft.action) { _,_ in draft.targetID = ""; draft.homeID = ""; draft.targetName = "" }
-            .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Save") { save(draft); dismiss() } } }
+            .toolbar { ToolbarItem(placement:.confirmationAction) {
+                Button("Save") { save(draft); dismiss() }.disabled(!draft.action.isAllowed(inProfile:profileID))
+            } }
     }
 }
 
@@ -226,13 +241,14 @@ struct LiveMotionView: View {
                         }
                     }
                     if store.configuration.selectedProfileID == "phone" { PhoneVolumeCard(store:store) }
+                    ComputerStudioCard(studio:store.studio)
                     MotionFeedbackCard(store:store)
                     WatchControlCard(store:store)
                     SensorChart(title:"User acceleration",unit:"g",frames:store.frames,keys:[\.ax,\.ay,\.az])
                     SensorChart(title:"Rotation rate",unit:"rad/s",frames:store.frames,keys:[\.rx,\.ry,\.rz])
                     SensorChart(title:"Roll / pitch relative · yaw raw",unit:"degrees",frames:store.frames,keys:[\.roll,\.pitch,\.yaw],scale:180 / .pi)
                     SensorChart(title:"Gravity",unit:"g",frames:store.frames,keys:[\.gx,\.gy,\.gz])
-                    Text("Arm extension uses the wrapped change in z / yaw from the ready haptic, shown above. The graph keeps raw yaw for comparison; roll and pitch are relative to the ready pose. Data stays on your devices and is not saved as a recording.")
+                    Text("Volume entry uses a wrapped yaw change of 55° from the ready pose with no extra hold. Once entered, twist like a knob. The graphs keep raw yaw for comparison; roll and pitch are relative to the ready pose. Computer studio can record full sensor data when explicitly enabled.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(20)
             }.navigationTitle("Live motion")
@@ -283,7 +299,8 @@ struct SetupView: View {
             Form {
                 Section("1 · Apple Watch") {
                     Label(link.status,systemImage:"applewatch")
-                    Text("Wizardry uses your existing iPhone–Watch pairing. Install both apps, open Wizardry on each, then sync. No separate watch pairing code is needed.")
+                    WatchConnectionCard(store:store,link:link)
+                    Text("Connect enables Wizardry commands for one selected target. Disconnect stops Wizardry control without unpairing Bluetooth or deleting saved computer credentials.")
                     Button("Sync settings to watch") { store.saveConfiguration() }
                     Text("Raise your wrist and double-touch your fingers to run Activate Wizardry. Hold still looking at the Watch for the ready haptic. Arm on the Watch also works. Keep AssistiveTouch single touch at None.")
                         .font(.caption)
@@ -297,8 +314,9 @@ struct SetupView: View {
                     Text(store.pairingStatus).font(.caption)
                     Link("Receiver installation instructions",destination:URL(string:"https://github.com/Yangston/wizardry/tree/main/receiver")!)
                     Text("The phone sends commands to the receiver on your local network. Tokens are stored in the iPhone Keychain and are never sent to the watch. Start with dry run. HTTP is intended for a trusted private network.").font(.caption)
-                    Text("Live volume needs the updated receiver running with --execute. Select Computer on Control, activate on the Watch, then extend to about 90° of yaw change. Dry run acknowledges simulated volume only.").font(.caption)
+                    Text("Live volume needs the updated receiver running with --execute. Select Computer on Control, activate on the Watch, turn past 55° of yaw change, then twist like a volume knob. Dry run acknowledges simulated volume only.").font(.caption)
                 }
+                Section("Computer studio") { ComputerStudioCard(studio:store.studio) }
                 Section("3 · Apple Home") {
                     Button("Connect / refresh Apple Home") { store.connectHome() }
                     Text(home.status)
@@ -318,8 +336,8 @@ struct SetupView: View {
                     Text("Start Spotify on the phone or Connect device you want to control. Commands target the active player. Phone profile uses Spotify for play/pause and tracks. Remote volume depends on the player's supported controls.").font(.caption)
                 }
                 Section("Phone volume") {
-                    NativeVolumeSlider(controller:store.phoneVolume).frame(height:40)
-                    Text("Select Phone on Control. Keep Wizardry open on iPhone with this slider visible, activate on the Watch, extend to about 90° yaw change, then raise/lower to change media volume live. A learned single touch or Lock volume ends adjustment. No volume Shortcut is needed for this experimental native-slider bridge.").font(.caption)
+                    PhoneVolumeDetails(controller:store.phoneVolume)
+                    Text("Select Phone on Control. Keep Wizardry open on iPhone with this slider visible, activate on the Watch, turn past 55° yaw change, then twist like a knob to change media volume. A learned single touch or Lock volume ends adjustment. No volume Shortcut is needed for this experimental native-slider bridge.").font(.caption)
                     Text("Use Control or Live to watch requested and confirmed volume. iOS does not document a system-volume setter; this bridge needs testing on your physical iPhone and audio output. Leaving Wizardry or changing output stops the session. It does not control ringer volume.").font(.caption).foregroundStyle(.secondary)
                     Text("Existing twist mappings still use Wizardry Volume Up / Wizardry Volume Down Shortcuts: Get Device Details → Current Volume, Calculate ±0.06, then Set Volume. Watch Now Playing also provides Digital Crown volume.").font(.caption)
                 }
@@ -352,11 +370,82 @@ struct NativeVolumeSlider: UIViewRepresentable {
 struct PhoneVolumeCard: View {
     @ObservedObject var store: PhoneStore
     var body: some View {
+        PhoneVolumeDetails(controller:store.phoneVolume)
+    }
+}
+
+private struct PhoneVolumeDetails: View {
+    @ObservedObject var controller: PhoneVolumeController
+    var body: some View {
         VStack(alignment:.leading,spacing:10) {
             Label("Live iPhone volume · experimental",systemImage:"speaker.wave.2").font(.headline)
-            NativeVolumeSlider(controller:store.phoneVolume).frame(height:40).accessibilityIdentifier("phone-volume-slider")
-            Text("Keep this slider visible. Extend after the ready haptic, then raise/lower to change media volume live. Single touch or Lock volume finishes. No Shortcut needed.")
+            NativeVolumeSlider(controller:controller).frame(height:40).accessibilityIdentifier("phone-volume-slider")
+            Label(controller.readinessMessage ?? "Native slider available · writes require system readback",systemImage:controller.readinessMessage == nil ? "checkmark.circle" : "exclamationmark.circle")
+                .font(.caption).foregroundStyle(controller.readinessMessage == nil ? .green : .orange)
+                .accessibilityIdentifier("phone-volume-readiness")
+            if let actual = controller.lastReadback {
+                Text(String(format:"System readback %.1f%%",actual*100)).font(.caption.monospacedDigit())
+                    .accessibilityIdentifier("phone-volume-readback")
+            }
+            if let requested = controller.lastRequested {
+                Text(String(format:"Requested %.1f%%",requested*100)).font(.caption.monospacedDigit())
+                    .accessibilityIdentifier("phone-volume-requested")
+            }
+            if let failure = controller.lastFailure {
+                Text(failure).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("phone-volume-error")
+            }
+            Button("Check iPhone volume readiness") { controller.refreshReadiness() }.font(.caption)
+            Text("Keep this slider visible and Wizardry open. A live session prevents iPhone idle dimming until lock, interruption, or its bounded timeout. Locking the phone or switching apps still stops control. No Shortcut is needed for live volume.")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(18).background(.purple.opacity(0.1),in:RoundedRectangle(cornerRadius:20))
+    }
+}
+
+private struct ComputerStudioCard: View {
+    @ObservedObject var studio: DesktopStudioRelay
+    var body: some View {
+        VStack(alignment:.leading,spacing:9) {
+            Toggle("Computer studio",isOn:Binding(get:{studio.enabled},set:{studio.setEnabled($0)}))
+                .font(.headline).accessibilityIdentifier("computer-studio-toggle")
+            Text(studio.status).font(.caption).foregroundStyle(studio.recording ? .orange : .secondary)
+                .accessibilityIdentifier("computer-studio-status")
+            if studio.enabled {
+                Text("Forwarded \(studio.forwardedSamples) samples · dropped \(studio.droppedSamples)")
+                    .font(.caption2.monospacedDigit())
+            }
+            if studio.recording {
+                Label("Recording · Watch and test actions disabled",systemImage:"record.circle")
+                    .font(.caption.bold()).foregroundStyle(.orange)
+            }
+            Text("Live sensors, recordings, and mapping edits use the paired computer receiver. This is separate from the command target; Phone can stay selected. Keep Wizardry foreground on iPhone and open the computer studio dashboard.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(14).background(.cyan.opacity(0.08),in:RoundedRectangle(cornerRadius:16))
+    }
+}
+
+private struct WatchConnectionCard: View {
+    @ObservedObject var store: PhoneStore
+    @ObservedObject var link: WatchLink
+    var body: some View {
+        VStack(alignment:.leading,spacing:8) {
+            Label(store.configuration.allowsControl ? "Control target: \(store.configuration.selectedProfile.name)" : "Watch control disconnected",
+                  systemImage:store.configuration.allowsControl ? "applewatch.radiowaves.left.and.right" : "applewatch.slash")
+                .font(.headline).accessibilityIdentifier("control-target-status")
+            Text(store.controlConnectionMessage).font(.caption).foregroundStyle(.secondary)
+            if store.configuration.allowsControl {
+                Text(link.reachable
+                    ? (store.lastWatchRevision == store.configuration.revision ? "Latest selection confirmed on Watch" : "Waiting for Watch to confirm this selection")
+                    : "Open Wizardry on your Watch to connect")
+                    .font(.caption).foregroundStyle(store.lastWatchRevision == store.configuration.revision && link.reachable ? .green : .orange)
+            }
+            HStack {
+                Button("Connect Watch") { store.connectWatchControl() }
+                    .accessibilityIdentifier("connect-watch-control")
+                Button("Disconnect",role:.destructive) { store.disconnectWatchControl() }
+                    .disabled(!store.configuration.allowsControl).accessibilityIdentifier("disconnect-watch-control")
+            }.buttonStyle(.bordered)
+            Text("Only the selected target receives commands. Computer pairing can stay saved while Phone is selected.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }.padding(14).background(.purple.opacity(0.08),in:RoundedRectangle(cornerRadius:16))
     }
 }

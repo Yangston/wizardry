@@ -9,7 +9,7 @@ final class LiveVolumeRemote: ObservableObject {
     @Published private(set) var state = State.idle
     @Published private(set) var requested: Double?
     @Published private(set) var acknowledged: Double?
-    @Published private(set) var message = "Experimental height control"
+    @Published private(set) var message = "Live twist volume"
     @Published private(set) var dryRun = false
     var didBegin: (() -> Void)?
     var didFinish: (() -> Void)?
@@ -29,7 +29,7 @@ final class LiveVolumeRemote: ObservableObject {
     func begin(revision: String, phone: Bool = false) {
         guard !ownsMotion else { return }
         cancelWake()
-        scheduler.begin(revision:revision)
+        scheduler.begin(revision:revision,profileID:phone ? "phone" : "computer")
         requested = nil; acknowledged = nil; dryRun = false; lockRequested = false
         lastDisplay = -.infinity
         state = .beginning; message = phone ? "Reading iPhone volume…" : "Reading computer volume…"
@@ -71,7 +71,7 @@ final class LiveVolumeRemote: ObservableObject {
                     self.requested = self.scheduler.latestTarget
                     self.lastDisplay = ProcessInfo.processInfo.systemUptime
                     if self.scheduler.phase == .adjusting {
-                        self.state = .adjusting; self.message = "Raise / lower · lock when ready"
+                        self.state = .adjusting; self.message = "Twist + / − · lock when ready"
                         self.didBegin?()
                     }
                 case .ended:

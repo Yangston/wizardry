@@ -17,16 +17,47 @@ final class PhoneStore: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var lastVolumeReply: VolumeReply?
     @Published private(set) var watchDiagnostics: InteractionDiagnosticsSnapshot?
+    @Published private(set) var lastWatchRevision: String?
+    @Published private(set) var controlConnectionMessage = "Open Wizardry on the Watch to confirm the selected target"
+    @Published private(set) var studioRecording = false
     let link = WatchLink()
     let home = HomeController()
     let spotify = SpotifyController()
     let phoneVolume = PhoneVolumeController()
+    lazy var studio: DesktopStudioRelay = {
+        let relay = DesktopStudioRelay(link:link)
+        relay.configuration = { [weak self] in
+            guard let self else {
+                var unavailable = WizardryConfiguration(); unavailable.controlConnectionEnabled = false
+                return unavailable
+            }
+            return self.configuration
+        }
+        relay.applyMapping = { [weak self] edit in
+            guard let self else { return "iPhone unavailable" }
+            guard let updated = edit.applying(to:self.configuration) else {
+                return "Mapping is invalid or out of date; refresh the computer studio and try again"
+            }
+            self.configuration = updated
+            self.saveConfiguration()
+            return nil
+        }
+        relay.recordingChanged = { [weak self] recording in
+            guard let self else { return }
+            self.studioRecording = recording
+            if recording { self.invalidateVolume("Computer recording started; Watch actions are disabled") }
+        }
+        return relay
+    }()
     private var gate = CommandGate()
     private var volumeCoordinator = VolumeCommandCoordinator()
     private var volumeReplies: [UUID: (VolumeReply) -> Void] = [:]
     private var volumeBusy: Bool { volumeCoordinator.isBusy }
     private var player: AVAudioPlayer?
     private var chimeGeneration = 0
+    private var savedConfiguration: WizardryConfiguration?
+    private var seenControlRequests: [UUID:Double] = [:]
+    private var lastControlDecisionTime = -Double.infinity
     private let network = ComputerClient()
     struct ActionLog: Identifiable {
         let id = UUID()
@@ -37,9 +68,21 @@ final class PhoneStore: ObservableObject {
     init() {
         let saved = UserDefaults.standard.data(forKey:"wizardryConfiguration").flatMap { try? JSONDecoder().decode(WizardryConfiguration.self,from:$0) }
         configuration = saved?.isValid == true ? saved! : WizardryConfiguration()
+        savedConfiguration = configuration
         endpoint = UserDefaults.standard.string(forKey:"serverURL") ?? ""
         pairingToken = PairingKeychain.load()
         link.activated = { [weak self] in guard let self else { return }; self.link.sync(self.configuration) }
+        link.configurationAcknowledged = { [weak self] revision in
+            guard let self, revision == self.configuration.revision else { return }
+            self.lastWatchRevision = revision
+            self.controlConnectionMessage = self.configuration.allowsControl
+                ? "Watch selection confirmed · \(self.configuration.selectedProfile.name)"
+                : "Watch control disconnected"
+        }
+        link.controlRequestReceived = { [weak self] request,reply in
+            guard let self else { return }
+            self.receiveControlConnection(request,reply:reply)
+        }
         link.diagnosticsReceived = { [weak self] in self?.watchDiagnostics = $0 }
         link.framesReceived = { [weak self] frames in
             guard let self else { return }
@@ -53,11 +96,17 @@ final class PhoneStore: ObservableObject {
         }
         link.gestureReceived = { [weak self] event,reply in
             guard let self else { reply(.failure("Phone unavailable")); return }
+            guard !self.studio.recording else { reply(.failure("Computer recording is active; Watch actions are disabled")); return }
+            guard self.configuration.allowsControl else { reply(.failure("Watch control is disconnected")); return }
             guard let binding = self.gate.accept(event,configuration:self.configuration,now:Date().timeIntervalSince1970) else {
                 reply(.failure("Expired, duplicate, disabled, or out-of-date gesture. Sync settings and try again.")); return
             }
             guard !self.busy, !self.volumeBusy else { reply(.failure("Previous action still running")); return }
             Task {
+                guard !self.studio.recording, self.configuration.allowsControl, event.revision == self.configuration.revision,
+                      event.profileID == self.configuration.selectedProfileID else {
+                    reply(.failure("Control target changed or disconnected; activate again")); return
+                }
                 let task = UIApplication.shared.beginBackgroundTask(withName:"Wizardry action",expirationHandler:nil)
                 let result = await self.perform(binding,deadline:event.createdAt+5)
                 reply(result)
@@ -67,6 +116,8 @@ final class PhoneStore: ObservableObject {
         if UserDefaults.standard.bool(forKey:"homeEnabled") { home.connect() }
         link.volumeReceived = { [weak self] request,reply in
             guard let self else { reply(.failure("Phone unavailable",request:request)); return }
+            guard !self.studio.recording else { reply(.failure("Computer recording is active; volume control is disabled",request:request)); return }
+            guard self.configuration.allowsControl else { reply(.failure("Watch control is disconnected",request:request)); return }
             guard !self.busy else { reply(.failure("Previous action still running",request:request)); return }
             let ticket = UUID()
             self.volumeReplies[ticket] = reply
@@ -95,7 +146,7 @@ final class PhoneStore: ObservableObject {
                     let task: UIBackgroundTaskIdentifier = phone ? .invalid : UIApplication.shared.beginBackgroundTask(withName:"Wizardry live volume",expirationHandler:nil)
                     defer { if task != .invalid { UIApplication.shared.endBackgroundTask(task) } }
                     let result: VolumeReply
-                    guard self.volumeCoordinator.isCurrentExecution(ticket),
+                    guard !self.studio.recording, self.volumeCoordinator.isCurrentExecution(ticket),
                           request.revision == self.configuration.revision,
                           profileID == self.configuration.selectedProfileID,
                           Date().timeIntervalSince1970 < request.createdAt+1 else {
@@ -120,10 +171,99 @@ final class PhoneStore: ObservableObject {
     }
     func saveConfiguration() {
         guard configuration.isValid else { return }
+        guard configuration != savedConfiguration else { link.sync(configuration); return }
         invalidateVolume("Settings changed. Activate again.")
         configuration.revision = UUID().uuidString
+        savedConfiguration = configuration
+        lastWatchRevision = nil
+        controlConnectionMessage = configuration.allowsControl
+            ? "Syncing \(configuration.selectedProfile.name) selection to Watch"
+            : "Watch control disconnected"
         if let data = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(data,forKey:"wizardryConfiguration") }
         link.sync(configuration)
+    }
+    /// Selection and its new revision are committed together on the main actor.
+    /// The UI never leaves a new target paired with an old accepted revision.
+    func selectProfile(_ id: String) {
+        guard configuration.profiles.contains(where:{$0.id == id}), configuration.selectedProfileID != id else { return }
+        lastControlDecisionTime = Date().timeIntervalSince1970
+        configuration.selectedProfileID = id
+        saveConfiguration()
+        phoneVolume.refreshReadiness()
+    }
+    func connectWatchControl() {
+        lastControlDecisionTime = Date().timeIntervalSince1970
+        if !configuration.allowsControl {
+            configuration.controlConnectionEnabled = true
+            saveConfiguration()
+        } else { link.sync(configuration) }
+        controlConnectionMessage = "Confirming \(configuration.selectedProfile.name) on Watch"
+    }
+    func disconnectWatchControl() {
+        lastControlDecisionTime = Date().timeIntervalSince1970
+        applyControlDisconnect()
+    }
+    private func applyControlDisconnect() {
+        // Local command admission closes before notifying an unreachable Watch.
+        if configuration.allowsControl {
+            configuration.controlConnectionEnabled = false
+            saveConfiguration()
+        } else { invalidateVolume("Watch control disconnected") }
+        link.stopStream()
+        controlConnectionMessage = "Watch control disconnected · Apple pairing is unchanged"
+    }
+    private func receiveControlConnection(_ request: ControlConnectionRequest,
+                                          reply: @escaping (ControlConnectionReply) -> Void) {
+        let now = Date().timeIntervalSince1970
+        seenControlRequests = seenControlRequests.filter { now-$0.value < 30 }
+        guard request.isValid, request.createdAt <= now+0.1, now-request.createdAt <= 5,
+              seenControlRequests[request.id] == nil else {
+            reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"Connection request expired; try Connect again")); return
+        }
+        seenControlRequests[request.id] = now
+        if request.operation != .status {
+            guard request.createdAt >= lastControlDecisionTime else {
+                reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"An older connection request cannot replace your latest selection")); return
+            }
+            lastControlDecisionTime = request.createdAt
+        }
+        if request.operation == .disconnect {
+            applyControlDisconnect()
+            reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"Watch control disconnected")); return
+        }
+        if request.operation == .connect {
+            if let profileID = request.profileID {
+                guard configuration.profiles.contains(where:{$0.id == profileID}) else {
+                    reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"Unknown control target")); return
+                }
+                // Commit both changes in one revision and one invalidation.
+                configuration.selectedProfileID = profileID
+            }
+            if !configuration.allowsControl { configuration.controlConnectionEnabled = true }
+            saveConfiguration()
+        }
+        guard configuration.allowsControl else {
+            reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"Watch control is disconnected; tap Connect")); return
+        }
+        guard !studio.recording else {
+            reply(.init(id:request.id,configuration:configuration,targetReady:false,message:"Computer recording is active; actions are disabled")); return
+        }
+        let revision = configuration.revision, profile = configuration.selectedProfileID
+        Task { [weak self] in
+            guard let self else { return }
+            let issue: String?
+            if profile == "phone" {
+                issue = await self.phoneVolume.waitForReadiness()
+            } else if profile == "computer" {
+                issue = await self.network.volumeReadiness(endpoint:UserDefaults.standard.string(forKey:"serverURL") ?? "",token:PairingKeychain.load())
+            } else { issue = nil }
+            guard self.configuration.revision == revision, self.configuration.allowsControl, !self.studio.recording else {
+                reply(.init(id:request.id,configuration:self.configuration,targetReady:false,message:"Target changed; connect again")); return
+            }
+            let message = issue ?? "Ready · \(self.configuration.selectedProfile.name) is the only control target"
+            self.controlConnectionMessage = message
+            reply(.init(id:request.id,configuration:self.configuration,targetReady:issue == nil,message:message))
+        }
     }
     func connectHome() { UserDefaults.standard.set(true,forKey:"homeEnabled"); home.connect() }
     func pairComputer() async {
@@ -137,6 +277,7 @@ final class PhoneStore: ObservableObject {
         let result = await network.send("ping",endpoint:address,token:token)
         guard result.outcome != .failed else { pairingStatus = result.message; return }
         do {
+            studio.setEnabled(false)
             try PairingKeychain.save(token)
             invalidateVolume("Receiver pairing changed. Activate again.")
             UserDefaults.standard.set(address,forKey:"serverURL")
@@ -149,8 +290,17 @@ final class PhoneStore: ObservableObject {
     func clearFrames() { frames = []; lastTelemetry = .distantPast }
     func suspendPhoneVolume() {
         if configuration.selectedProfileID == "phone" { invalidateVolume("Keep Wizardry open on iPhone. Activate again.") }
+        phoneVolume.refreshReadiness()
     }
     private func perform(_ binding: GestureBinding, deadline: Double) async -> ActionResult {
+        guard !studio.recording else {
+            let failure = ActionResult.failure("Computer recording is active; actions are disabled")
+            record(binding,failure); return failure
+        }
+        guard binding.action.isAllowed(inProfile:configuration.selectedProfileID) else {
+            let failure = ActionResult.failure("This mapping belongs to another target. Choose an action for \(configuration.selectedProfile.name).")
+            record(binding,failure); return failure
+        }
         guard !busy, !volumeBusy, !phoneVolume.isActive, Date().timeIntervalSince1970 <= deadline else { return .failure("Action expired or phone is busy") }
         busy = true; defer { busy = false }
         let result: ActionResult
@@ -244,6 +394,14 @@ final class ComputerClient: NSObject, URLSessionTaskDelegate, @unchecked Sendabl
             rememberClock(time,endpoint:base.absoluteString,token:token)
             return nil
         } catch { return .failure("Receiver time check failed: \(error.localizedDescription)") }
+    }
+    /// Read-only capability check; never begins a volume session or changes audio.
+    func volumeReadiness(endpoint: String, token: String) async -> String? {
+        guard let base = URL(string:endpoint.trimmingCharacters(in:.whitespacesAndNewlines)),
+              ["http","https"].contains(base.scheme ?? ""), base.host != nil,
+              base.user == nil, base.password == nil, base.query == nil, base.fragment == nil,
+              token.count >= 16 else { return "Pair the Computer receiver in Setup first" }
+        return await sampleClock(base:base,token:token,deadline:Date().timeIntervalSince1970+3)?.message
     }
     func volume(_ event: VolumeRequest, endpoint: String, token: String) async -> VolumeReply {
         guard let base = URL(string:endpoint.trimmingCharacters(in:.whitespacesAndNewlines)),

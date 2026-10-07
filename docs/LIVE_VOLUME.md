@@ -1,107 +1,109 @@
-# Experimental live computer and iPhone volume
+﻿# Experimental live computer and iPhone volume
 
-The intended flow is **wake watch → double finger touch → ready haptic while looking at the watch → extend arm → raise/lower hand → one single finger touch to lock**.
+The intended flow is **wake Watch → double finger touch → hold still → ready haptic → extend past 55° yaw → twist like a knob → lock**.
 
-The double touch uses the user's existing AssistiveTouch **Activate Wizardry** Shortcut assignment. Assign AssistiveTouch's single touch to **None**. Wizardry learns and detects the single touch itself; it does not receive Apple's single-touch recognition events. Manual **Arm** follows the same hold-still calibration. There is no twist-to-wake sequence.
+Use the existing AssistiveTouch **Activate Wizardry** Shortcut assignment for double finger touch. Assign AssistiveTouch single touch to **None**. Wizardry's optional personalized detector recognizes single touches itself; before enrollment, use **Lock volume**. Manual **Arm** performs the same initial hold-still calibration. There is no twist-to-wake sequence.
 
-## Setup and use
+## Connect and adjust
 
-1. Update both apps and the Windows receiver. Pair the receiver, run it with `--execute`, and select the Computer profile. Without `--execute`, volume acknowledgements are explicitly dry runs starting at 50%.
-2. Activate while looking at the watch; hold still for 250 ms. Extension has priority over discrete gestures. The wrapped z / yaw change must reach 70–110 degrees from the ready pose and settle for 250 ms. Either sign is accepted. A pure yaw turn does not change the watch-face normal, so normals are not the extension criterion.
-3. The receiver reads Windows' current default multimedia output volume without setting it. This level is the starting anchor; movements change it incrementally. Wait for the entry haptic, then make short upward/downward movements with pauses. The previous direction mapping is inverted to match the user's observed setup: raise increases volume, lower decreases it. About 20 cm of estimated control travel adds/subtracts 20 percentage points. A pause holds the current volume and resets estimated velocity; it does not snap to a physical height.
-4. Use **Lock volume** before enrolling your tap. After enrollment, a single thumb-index touch locks. The detector waits 450 ms from its candidate onset for a possible second touch. Classification can add latency if a second candidate is still being evaluated.
-5. **Locking** means the final request is pending. **Locked** means the receiver acknowledged the final value and closed the session. Requested and acknowledged percentages, yaw change, mode and tap status appear on the Watch and on iPhone Control / Live; dry-run acknowledgement is not audio execution.
+1. Install both updated apps. Connect **Computer** or **Phone** from the Watch or iPhone control screen. Only one command target is active, and the paired iPhone relays every Watch command. **Disconnect** stops Wizardry control without unpairing devices or deleting saved receiver credentials.
+2. For Computer, pair the updated receiver using its address and token, then run it with `--execute`. Without `--execute`, acknowledgements are explicitly dry runs starting at 50%. Phone live volume does not require a computer receiver.
+3. Activate while looking at the Watch and hold still for 250 ms until the ready haptic. Extend until the absolute wrapped z / yaw change reaches **55°** from that ready pose. Either direction qualifies. Entry occurs on the first fresh sample across the threshold, without another stillness delay or an upper-angle cutoff. Pure yaw does not change the watch-face normal, so normals are not the entry criterion.
+4. The selected output reads its actual volume without changing it; the current roll becomes the knob baseline. Twist slightly positive to increase volume or negative to decrease it. **90° changes volume by 50 percentage points; 180° spans the full 0–100% range.** Wrapped roll deltas avoid jumps across ±180°. At 0% or 100%, reversing responds immediately without undoing extra outward rotation first. Raising/lowering and pitch are not the volume inputs.
+5. Hold still to retain the current level, then resume twisting without reactivation. Crossing the viewing yaw does not exit volume. Existing discrete twist/tilt/shake actions remain suppressed until fresh activation after volume ends.
+6. Press **Lock volume**, or use a learned single thumb-index touch. **Locking** means the final request is pending; **Locked** means the selected output confirmed the final level and closed the session. Requested and acknowledged percentages remain separate; a dry-run acknowledgement is not audio execution.
 
-After entry, rotate freely while adjusting: crossing the viewing yaw neither freezes nor ends volume. Holding still retains live volume and its autorotation lease; resume raising/lowering without activating again. Volume ends on lock, session expiry, settings changes, backgrounding, interrupted sensing, or transport failure. Activate again after an interaction ends. Temporary autorotation starts with foreground calibration and the same lease remains through readiness, live adjustment, stationary pauses, and the final acknowledgement. It is capped at ten minutes from calibration and the outer session's remaining duration; failures and explicit interruptions release it. Inactive calibration can continue only with a valid lease and fresh samples; backgrounding cancels it. Autorotation can flip the interface without changing the relative sensor angles used by gestures. Extended runtime sessions and the self-care capability are not used.
+A learned tap waits 450 ms from candidate onset for possible double-touch cancellation; a second candidate can add classification latency. During a deliberate sensing/tap freeze, the knob rebases to the current roll so hidden movement is not replayed afterward.
 
-**Physical display acceptance is required:** during movement and stationary live-volume pauses, the Watch must stay awake in sideways, palm-up, and backward-tilt poses. A dimmed or black display with continued volume control does not pass. The user reported rotation working in **0.2.0 (15.1)**; stationary holds, complete pose coverage, and battery behavior remain unverified. Requesting autorotation does not guarantee indefinite display wakefulness.
+Holding still has **no five-second auto-exit**. Live volume ends on lock, explicit disconnect/stop, session expiry, relevant settings changes, backgrounding, interrupted sensing, or transport failure. Activate again after an interaction ends. Temporary autorotation begins with foreground calibration and retains the same lease through readiness, adjustment, stationary pauses, and final acknowledgement. The cap is ten minutes from calibration and the outer session's remaining duration. Inactive calibration requires a valid lease and fresh samples; backgrounding cancels it. No extended runtime session, artificial workout, or silent audio is used.
+
+**Physical display acceptance remains pending:** during movement and stationary pauses, the Watch must stay awake in sideways, palm-up, and backward-tilt poses. Continued processing alone does not prove that the display stayed awake. The user reported rotation working in **0.2.0 (15.1)**. Build **16.1** added stationary-hold behavior, but physical hold, full pose coverage, and battery checks are not established. Autorotation is not an indefinite display-wake guarantee.
 
 ## Live iPhone volume (experimental)
 
-1. Install both updated apps. On iPhone Control, select **Phone** and sync settings to the Watch. Keep Wizardry foreground with the native volume slider visible on Control, Live, or Setup. Computer pairing, Spotify authorization, and volume Shortcuts are not required for this path.
-2. Use the same wrist wake → AssistiveTouch double finger touch → hold still → ready haptic → approximately ±90° relative yaw → entry haptic flow. Begin reads the current iPhone media-output volume without changing it.
-3. Raise/lower in short vertical strokes to change media volume immediately. The phone uses public `UISlider` value/control events on the native `MPVolumeView` slider, then reads `AVAudioSession.outputVolume`. Requested and acknowledged levels remain separate. Acknowledgements require readback within one percentage point of the request; setting the visible slider alone is not success.
-4. A learned single finger touch or **Lock volume** sends the final level and closes the session after readback. Holding still or crossing the ready yaw does not exit adjustment; movement can resume within the same bounded session. Watch interruptions and the existing session cap still end it. The current applied level stays in place.
-5. The iPhone stops on leaving/inactivating Wizardry, unavailable/offscreen native slider, output-route changes, failed readback, invalid ordering, or request expiry. Its six-second watchdog closes sessions with no received request; a healthy stationary session sends an unchanged-volume heartbeat every second and remains active. Each write happens once, with up to 400 ms to observe readback inside the original one-second deadline. One write executes at a time and only the newest waiting target is retained; superseded targets are not volume acknowledgements. Failures discard pending work without retry or later replay. There is no extra phone background task, workout, or silent audio. A mixing ambient audio session is active only to read volume during the session.
+1. Connect **Phone** and keep Wizardry foreground on iPhone with its native volume slider visible on Control, Live, or Setup. Spotify authorization, computer pairing, and volume Shortcuts are unnecessary for this path.
+2. Use the same initial calibration, immediate 55° yaw entry, and signed twist-knob adjustment as Computer. Begin reads current iPhone media volume without setting it.
+3. The bridge now hosts an ordinary `MPVolumeView` rather than subclassing that native control. It sends public `UISlider` value/control events and reads `AVAudioSession.outputVolume`. Fixing the unsupported subclass path is not physical-device validation. Requested and acknowledged values stay separate: confirmation requires actual readback within one percentage point of the requested level, not just a moved slider.
+4. Lock sends the frozen final level and closes after readback. The applied level remains in place. Holding still and crossing the ready yaw do not end adjustment; session/runtime caps and explicit interruptions still apply.
+5. Leaving or inactivating Wizardry on iPhone, an unavailable/offscreen slider, audio-route changes, failed readback, invalid ordering, and expired requests stop adjustment. Each write is attempted once, with up to 400 ms for readback inside the original one-second deadline. One write executes while only the newest unsent target waits. Superseded targets are not confirmed volume changes; failure discards pending work without retries.
 
-**Platform boundary:** Apple does not document a system-volume setter. This bridge depends on the native volume view containing an enabled public slider and responding to its control events; those implementation details can change. No private class names or selectors are used. Real-device output-volume control, readback timing, routing, and compatibility are **unverified** until tested on the user's iPhone. The Simulator cannot change system volume and returns an explicit error. This controls media volume, not ringer/alert volume, and does not support a locked/background iPhone. Native slider touch and Watch Now Playing remain available.
+**Platform boundary:** Apple does not document a programmatic system-volume setter. This bridge depends on the native control exposing an enabled public slider that responds to control events. No private class names or selectors are used. Real output control, route behavior, timing, and compatibility remain experimental until tested on the user's physical iPhone. The Simulator returns an explicit unsupported error. This controls media volume, not ringer/alert volume, and cannot control a locked/background iPhone. Native slider touch and Watch Now Playing remain available.
 
-The existing Phone twist mappings are preserved: they still launch the named Volume Up/Down Shortcuts. Arm extension has priority over those mappings; they stay suppressed until fresh activation after volume control.
+The existing discrete Phone twist mappings still launch the named Volume Up/Down Shortcuts. Extension takes priority, and those discrete mappings remain suppressed throughout knob adjustment. The live knob does not launch a volume Shortcut.
 
 ### iPhone acceptance checks (pending physical testing)
 
-- [ ] Record iPhone model/iOS, Watch model/watchOS, wrist orientation, output route, and actual delivered rates.
-- [ ] Start media at several known levels. Begin must match the current level without changing it; raising/lowering must audibly change volume during movement before lock.
-- [ ] Compare the system volume indicator with requested and acknowledged values. Acknowledged values must be audio-session readback, including at 0% and 100%. Measure median and worst-case movement-to-applied-volume latency; neither the 50 Hz send limit nor confirmed acknowledgement Hz establishes actual applied-output Hz.
-- [ ] Lock with the button and personalized single touch. Verify the final system volume holds, and discrete gestures remain suppressed until fresh activation.
-- [ ] Hold still for 10–30 seconds during live volume. The physical display remains awake, volume stays constant, and raising/lowering resumes adjustment without reactivation. Confirm the one-second heartbeat continues; the ten-minute cap and explicit lock still end the session.
-- [ ] Lock the iPhone, switch phone apps, scroll the slider offscreen, disconnect the Watch, or change speaker/headphone/AirPlay routes mid-adjustment. No later update may replay; activate again to recover.
-- [ ] Verify actual music remains playing when Wizardry starts/stops its mixing audio session. Check speaker and headphones separately; treat AirPlay as unverified until tested.
-- [ ] Confirm Computer volume and all existing twist/tilt/shake mappings still work in their selected profiles.
+- [ ] Record iPhone/iOS, Watch/watchOS, wrist and crown orientation, output route, and actual delivered rates.
+- [ ] Begin at several known levels without changing them. Small positive twists increase audible volume; small negative twists decrease it before lock. Test a ±180° wrap crossing without a volume jump.
+- [ ] Compare actual system volume with requested and acknowledged levels, including 0%/100%. Confirm immediate reverse response at either limit. Measure movement-to-applied-volume timing separately from acknowledgement arrival rate.
+- [ ] Lock with the button, then with an enrolled single touch. The final level holds, and discrete gestures remain suppressed until reactivation.
+- [ ] Hold still for 10–30 seconds: the physical display stays awake, volume stays constant, and twisting resumes adjustment without reactivation. Verify one-second heartbeats and the existing ten-minute cap.
+- [ ] Lock iPhone, switch apps, hide the slider, disconnect the Watch, or change speaker/headphone/AirPlay routes mid-adjustment. Pending updates cannot replay on recovery.
+- [ ] Verify music continues while Wizardry starts/stops its mixing ambient audio session. Test speaker and headphones separately; AirPlay remains unverified until tested.
+- [ ] Confirm Computer and existing discrete mappings still work only for the selected connected target.
 
 ## Learn the single touch
 
-Open **Learn single finger tap** on the Watch. Wear it snugly, keep Wizardry visible, and start each step only after reading its instructions. Recording disables mapped actions.
+Open **Learn single finger tap** on the Watch. Wear it snugly, keep Wizardry visible, and follow each step. Enrollment disables mapped actions. This personalized tap setup is separate from desktop named movement recordings.
 
-While a recording is already frontmost, the Activate Wizardry shortcut clears pending control input but preserves the complete training recording instead of arming controls. The tap recognition model is disabled during recording. This allows the instructed double-touch negative trials with your existing AssistiveTouch assignment. Leaving the app or interrupted sensing still cancels the recording.
+If enrollment is already frontmost, **Activate Wizardry** clears pending control input but preserves the training recording instead of arming. Tap recognition is disabled while recording, allowing the instructed negative double-touch trials with the existing AssistiveTouch assignment. Leaving the app or interrupted sensing cancels enrollment.
 
 | Step | Instructions | Recording |
 | --- | --- | --- |
 | Stationary | Exactly 20 single touches, roughly one per second | 25 s |
-| Moving | Exactly 20 single touches while gently raising/lowering | 25 s |
-| Other movements | No single touches; isolated extensions, stops, twists, clenches, shakes, plus double touches | 60 s |
+| Moving | Exactly 20 single touches while gently moving | 25 s |
+| Other movements | No singles; isolated extensions, stops, twists, clenches, shakes, and double touches | 60 s |
 | New tap trials | Exactly 20 singles, mixing still and moving | 25 s |
 | New non-tap trials | Natural movements and double touches, no singles | 5 min |
 
-At least 30 training tap windows and five isolated negative windows are required. Double-touch pairs are handled by temporal cancellation rather than labeling their individual touches as negative single-touch templates. Dynamic time warping matches six-channel high-pass acceleration/rotation features against positive and negative templates. A threshold is selected from held-out recordings; the model requires at least 19 of 20 tap candidates and at most one false single-touch candidate in five minutes to enable custom tap input.
+At least 30 training tap windows and five isolated negative windows are required. Double-touch pairs use temporal cancellation instead of labeling each touch as a negative single-touch template. Dynamic time warping compares six-channel high-pass acceleration/rotation features. The model requires at least 19 of 20 tap candidates and at most one false candidate in five minutes before enabling custom tap input.
 
-Enrollment counts assume you perform the instructed number of touches. They are a personalized setup check, not independent research measurements. Insufficient examples, interrupted capture, or less than 70 Hz raw delivery require repeating the step. Enrollment has no effect on the onscreen Lock button. **Forget tap learning** removes the saved model. Templates remain on the Watch; this feature does not upload recordings.
+These counts assume the instructed number of touches; they are a personalized setup check, not independent research measurements. Insufficient examples, interruptions, or raw delivery below 70 Hz require repeating the step. Enrollment never disables the onscreen Lock button. **Forget tap learning** removes the model. Tap templates stay on the Watch.
+
+## Computer studio and named recordings
+
+Enable **Computer studio** on the foreground iPhone and keep Wizardry visible on the Watch. The receiver's **Live sensors** page can request monitoring independently of the selected command target. The iPhone is always the relay, including when Phone remains the active output.
+
+In **Record movements**, create a named movement, then select **Record example**. During **Preparing**, hold still. Move only after Watch confirmation and **Recording — move now**. Capture suppresses Watch gesture actions. **Stop & save** persists the recording on the local computer under `receiver/data/`; **Cancel** discards it. The 60-second limit and interruption handling retain quality evidence for incomplete takes. Only samples explicitly confirmed as recording are saved.
+
+**Map movements** stores named custom movements and action labels for later training. Those recordings and labels do not create or deploy a trained recognizer. Existing Computer/Phone discrete mappings are a separate editable configuration: desktop edits require an acknowledgement from the iPhone for the expected configuration revision. Home targets remain editable on iPhone. See the [receiver guide](../receiver/README.md) for studio pages and local files.
 
 ## Protocol and failure behavior
 
-- `/volume` accepts authenticated `begin`, `update`, and `end` JSON requests containing UUID `id` and `sessionID`, `revision`, monotonic-in-session integer `sequence`, wall-clock `createdAt`, and normalized `target` for update/end. Begin uses sequence zero without a target.
-- Requests expire after one second, with up to 100 ms positive clock tolerance. Phone and receiver validate identities and order. Both output backends retain their six-second missing-request watchdogs; unchanged live volume gets a heartbeat update each second. Holding still does not end a healthy session, renew its ten-minute autorotation cap, or bypass stale-motion checks.
-- Before begin, the phone samples receiver time through an authenticated ping and translates timestamps into the receiver clock domain. Each acknowledgement refreshes that sample. The original Watch/phone one-second deadline is also enforced, including time spent sampling the clock; return-trip delay makes the translated age more conservative. Clock alignment never retries or freshens an expired command.
-- The Watch starts updates at most every 20 ms (50 Hz), measured from send start, with at most four outstanding updates. Only the newest target waits locally; a full window waits for a reply to release a slot. An unchanged target sends a one-second heartbeat. End has a separate priority slot and freezes its final target instead of waiting for all update replies.
-- The phone serializes one executing write and retains one newest waiting target. Replacing an unsent update produces a `superseded` reply without a volume value; it cannot change acknowledged volume. End supersedes waiting updates and runs after the executing write. The receiver enforces 50 updates/s using a monotonic token bucket with burst capacity four. End bypasses this limiter and closes the session before I/O, so later updates cannot change it.
-- Transport v2 requires the updated iPhone app and, for Computer, an updated receiver. The receiver's authenticated ping advertises `liveVolumeProtocol: 2`; successful begin replies carry `transportVersion: 2`. Missing capability produces an update-required failure before adjustment. Update both apps and restart the receiver together. The updated receiver still accepts legacy 20 Hz clients.
-- Network, stale-sample, and final-ack failures discard pending targets. No automatic retries or later replay occur. A failed lock is shown as **stopped, unconfirmed**. A request already accepted by the receiver may have executed even if its reply was lost.
-- HTTP rejection messages identify the status and server reason: 401/403 pairing token, 404/405 missing live-volume route, 408 expiry/clock, 409 session ordering, 429 rate limit, 503 audio device. A missing receiver time sample asks you to update/restart the receiver. Pairing tokens are redacted from displayed server errors.
-- Core Audio controls the default multimedia render endpoint, preserving mute state. Changing the default endpoint ends the session rather than silently adjusting a different device. Existing key-based commands retain their original behavior.
+- Authenticated `/volume` requests use `begin`, `update`, and `end`, with UUID request/session identities, configuration revision, increasing sequence, creation time, and a normalized update/end target. New app requests also identify the selected control profile. Begin uses sequence zero without a target. Connection/profile changes invalidate old control work.
+- Requests expire after one second, allowing up to 100 ms positive clock tolerance. Backend sessions retain six-second missing-request watchdogs; a healthy stationary session sends an unchanged-volume heartbeat each second. Heartbeats never extend runtime caps or bypass stale sensing.
+- Before Computer begin, the iPhone samples receiver time through authenticated ping and translates request times into that clock domain. Replies refresh the sample. The original Watch/iPhone deadline remains enforced, including clock sampling time. Alignment never retries or freshens an expired request.
+- The Watch starts updates at most every 20 ms (50 Hz), with at most four outstanding updates and one newest local target. A full window waits for a reply. End freezes its final target and uses an independent priority slot.
+- The iPhone serializes one executing write plus one newest waiting target. Replaced updates receive `superseded` without a volume value. End supersedes waiting updates and runs after the executing write. The receiver uses a 50/s token bucket with burst capacity four; end bypasses the limiter and closes the session before I/O.
+- Transport v2 requires both updated apps and, for Computer, the updated receiver. Authenticated receiver ping advertises `liveVolumeProtocol: 2`; begin replies include `transportVersion: 2`. Missing capability produces an update-required failure before adjustment. The new receiver can still accept legacy 20 Hz clients.
+- Stale sensing, network errors, and missing final acknowledgements discard pending targets without retries or later replay. Failed lock means **stopped, unconfirmed**. An accepted request may have executed even if its reply was lost.
+- Receiver errors distinguish authentication, missing routes, expiry/clock, ordering, rate limit, and audio-device failures. Pairing credentials are redacted. Core Audio targets the current default multimedia endpoint and preserves mute; changing endpoints ends the session instead of silently controlling another output.
 
 ## Physical-device acceptance record
 
-Synthetic replay and CI validate control logic; actual finger recognition, inertial drift, paired delivery, and latency remain unverified until measured on hardware. Acceleration-only height estimation drifts, and constant-velocity motion can resemble rest. Use short movements with pauses.
+Synthetic replay and CI validate control logic; actual roll direction, personalized touch recognition, paired delivery, display behavior, and output latency still require hardware testing.
 
-| Measurement | Target | Current physical-device result |
+| Measurement | Target | Current physical result |
 | --- | --- | --- |
+| Entry | First fresh sample at ±55° wrapped ready-pose yaw; no extra settling delay | Not measured |
+| Knob direction and sensitivity | Positive increases; negative decreases; 90° changes 50 percentage points | Not measured |
+| Wrap and limits | No jump across ±180°; reversal at 0%/100% responds immediately | Not measured |
 | Single-touch recall, separate end-to-end trials | ≥95% | Not measured |
 | False actions during ordinary/negative activity | ≤1 per 5 min | Not measured |
 | Volume drift during a five-second stationary hold | ≤2 percentage points | Not measured |
-| Stationary live-volume hold, 10–30 seconds | Display awake; volume constant; movement resumes without reactivation | Not measured |
+| Stationary hold, 10–30 seconds | Display awake; volume constant; twist resumes without reactivation | Not measured |
 | Movement-to-applied-volume latency, median | ≤350 ms | Not measured |
-| Actual applied updates during changing-volume strokes, both outputs | ≥30 Hz; p95 inter-update gap ≤60 ms | Not measured |
-| Physical display during sideways, palm-up, backward tilt, and crossing viewing yaw | Awake throughout movement; no dimming or sleep | Not measured |
-| AssistiveTouch double activation does not lock accidentally | Pass | Not measured |
-| Left/right wrist, crown orientation, explicit stop and interruption handling | Pass | Not measured |
+| Actual applied updates while targets change, both outputs | ≥30 Hz; p95 inter-update gap ≤60 ms | Not measured |
+| Display sideways, palm-up, backward tilt, and crossing viewing yaw | Awake throughout; no unintended exit | Not measured |
+| AssistiveTouch double activation | Does not accidentally lock | Not measured |
+| Target switch, disconnect, explicit stop, and interruptions | No stale action or replay | Not measured |
 
-For **each** Computer and Phone output, perform three 15-second trials of changing-volume up/down strokes in each condition: sideways, palm-up, backward tilt, and rotating across the viewing yaw. Avoid saturation at 0%/100% while measuring update cadence. Observe the physical display throughout and measure successful applied/read-back output timestamps separately from Watch acknowledgement arrivals. The targets above are acceptance criteria to measure, not achieved results. Repeat without an attached debugger.
+For **both** Computer and Phone, perform three 15-second trials of small positive/negative twists while sideways, palm-up, backward tilted, and crossing the viewing yaw. Avoid 0%/100% saturation during cadence measurements. Observe the physical display and measure successful applied/read-back timestamps separately from Watch reply arrivals. Repeat without an attached debugger. Record hardware/OS, wrist/crown orientation, delivered rates, receiver mode, trial counts, drift, false actions, latency, and battery observations. Pending fields must not be replaced with simulator results.
 
-Record watch model, watchOS version, wrist/crown orientation, delivered raw/device-motion rates, receiver mode, trial counts, false actions, drift, actual applied rate and p95 gap, measured latency, and battery observations. Do not replace these pending fields with simulator results.
+## Motion, awake, and transport diagnostics
 
+Watch and iPhone show wrapped **Yaw change from ready pose**; extension enters at +55° or −55°. During adjustment, signed twist degrees are relative to the volume-entry roll and angular speed is degrees per second. These are angle measurements, not height/travel estimates. Control displays starting, requested, and acknowledged levels; stale data and dry runs are marked separately. All sensor axes remain available for inspection.
 
-## Yaw diagnostics
+Capture requests 100 Hz. Ordinary phone display samples remain bounded at up to 20 Hz with approximately 100 ms batches; busy telemetry drops unsent batches instead of building a replay queue. Desktop Studio uses its separate explicit sensor/recording subscription. Actual delivery rate and physical direction still require Watch measurements.
 
-The iPhone Control and Live screens show the wrapped **Yaw change from ready pose**. Looking at the Watch at the ready haptic establishes zero; extension should approach +90 or -90 degrees. The attitude graph retains raw yaw for comparison. Entry is 70-110 degrees held for 250 ms; after entry, returning through zero does not freeze or end adjustment. If motion becomes stale, the phone labels readings as last received rather than live. Control and Live request bounded local telemetry while foreground; other tabs stop the stream.
-
-## Awake and transport diagnostics
-
-Expand **Awake diagnostics** on Watch or iPhone to compare scene/application state, requested and read-back autorotation, whether the interface rotated, reduced luminance, delivered raw/device-motion Hz, sample age, processing delay, maximum sample gap, confirmed acknowledgement Hz, round-trip time, outstanding updates, and the last typed stop reason. The Watch persists up to 48 credential-free transition events, including the state before releasing autorotation. The phone receives best-effort diagnostics only during its live stream subscription.
-
-Confirmed acknowledgement Hz counts successful update replies observed by the Watch; it does not measure when the output applied those values. Correlate `display-reduced`, scene changes, and release reasons with physical observation. A true autorotation readback does not prove the display stayed awake. Display tests and measured applied-output timing remain required even when synthetic transport tests pass.
-
-## Movement and volume display
-
-The Watch opening screen shows signed twist, tilt and yaw bars relative to the ready pose. During volume control it shows a volume meter, the starting level, incremental change, and raising/lowering/holding feedback. iPhone Control opens with the same movement overview and a requested-versus-acknowledged volume chart; **All motion axes** expands acceleration, rotation, attitude and gravity graphs. Live includes the overview and all sensor graphs.
-
-Motion capture still requests 100 Hz. Display samples are taken at up to 20 Hz and sent to iPhone in pairs (roughly 100 ms batches rather than the previous 500 ms). Telemetry keeps one batch in flight and discards unsent batches when busy; it never queues old motion for replay. Volume travel and speed are short-stroke inertial estimates signed in the configured volume direction, not measured absolute world height. The display labels stale phone readings and distinguishes dry-run volume from applied audio. Actual capture rate, delivery latency and physical direction must still be checked on the Watch.
+**Awake diagnostics** reports scene/application state, requested/read-back autorotation, interface rotation, reduced luminance, raw/device-motion rates, sample age, processing delay, maximum gap, confirmed acknowledgement Hz, round-trip time, outstanding updates, and typed stop reason. The Watch retains up to 48 credential-free transition events. Confirmed acknowledgement Hz measures replies, not physical output application timing. Correlate lifecycle/release events with observation; a true autorotation readback does not prove that the display stayed awake.

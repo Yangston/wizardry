@@ -17,14 +17,20 @@ struct ContentView: View {
                         Text(motion.configuration.selectedProfile.name).font(.headline)
                     }
                     Text(motion.status).font(.caption).multilineTextAlignment(.center)
+                    WatchConnectionCard(motion:motion,link:link)
+                    if motion.studioRecording {
+                        Label("Computer recording · actions off",systemImage:"record.circle").font(.caption).foregroundStyle(.orange)
+                    } else if motion.studioStreaming {
+                        Label("Sensor stream → computer",systemImage:"waveform.path.ecg").font(.caption2).foregroundStyle(.secondary)
+                    }
                     VStack(spacing:5) {
                         MotionAxisMeter(title:"Twist",degrees:motion.rollDegrees)
                         MotionAxisMeter(title:"Tilt",degrees:motion.pitchDegrees,tint:.cyan)
                         MotionAxisMeter(title:"Yaw",degrees:motion.yawDegrees,tint:.orange)
-                        Text(motion.running ? "From ready pose · raise ↑ / lower ↓" : "Activate to see live movement")
+                        Text(motion.running ? "Yaw 55° to enter · twist + / −" : "Activate to see live movement")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
-                    VolumeStatusView(remote:motion.volume,feedback:motion.volumeMotion,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
+                    VolumeStatusView(remote:motion.volume,feedback:motion.volumeTwist,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
                     if #available(watchOS 11.0, *) {
                         armButton.handGestureShortcut(.primaryAction)
                     } else { armButton }
@@ -34,10 +40,9 @@ struct ContentView: View {
                     Text(motion.actionStatus).font(.caption).foregroundStyle(motion.actionFailed ? .orange : .secondary)
                         .multilineTextAlignment(.center)
                     Text("\(motion.lastGesture) · \(motion.count)").font(.caption2)
-                    Text(link.reachable ? "iPhone connected" : "Open Wizardry on iPhone").font(.caption2).foregroundStyle(.secondary)
-                    NavigationLink("Now Playing",value:MotionController.Screen.nowPlaying)
+                    NavigationLink("Now Playing",value:MotionController.Screen.nowPlaying).disabled(motion.studioRecording)
                     NavigationLink("Gesture guide",value:MotionController.Screen.guide)
-                    NavigationLink("Learn single finger tap",value:MotionController.Screen.enrollment)
+                    NavigationLink("Learn single finger tap",value:MotionController.Screen.enrollment).disabled(motion.studioRecording)
                     Button("Test vibration") { motion.testHaptic() }
                     Text(String(format:"Yaw change %+.0f° · %.0f Hz",motion.yawDegrees,motion.sampleRate))
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
@@ -77,11 +82,13 @@ struct ContentView: View {
         }
         .onChange(of:motion.navigationPath) { _,_ in motion.navigationChanged() }
         .onChange(of:isLuminanceReduced,initial:true) { _,value in motion.setReducedLuminance(value) }
+        .onChange(of:link.reachable) { _,reachable in if reachable { motion.refreshConnection() } }
+        .task { motion.refreshConnection() }
     }
     private var armButton: some View {
         Button(motion.armed ? "Armed · \(motion.armRemaining)s" : "Arm now") { motion.arm() }
             .buttonStyle(.borderedProminent).tint(motion.armed ? .green : .purple)
-            .disabled(motion.activatingFromShortcut)
+            .disabled(motion.activatingFromShortcut || motion.connectionBusy || motion.studioRecording || !motion.configuration.allowsControl)
     }
     private var guide: some View {
         ScrollView {
@@ -92,8 +99,9 @@ struct ContentView: View {
                 Text("Raise your wrist, double-touch your fingers to activate, and hold still looking at the Watch until the ready haptic. Then extend for volume, or make a mapped wrist action.")
                 Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. While armed, the screen can flip when you turn your wrist away. Leaving Wizardry disarms it.")
                 Text("Live volume · experimental").font(.headline)
-                Text("Look at the Watch while holding still for the ready haptic. Extend your arm until z / yaw changes about 90° from that pose. Hold briefly for the entry haptic, then raise or lower vertically in short strokes with pauses. One learned single finger tap locks volume. Lock volume works before enrollment.")
-                Text("Rotate freely and pause while adjusting; looking back or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
+                Text("Look at the Watch while holding still for the ready haptic. Turn yaw past 55° from that pose to enter volume immediately. Turn your hand like a knob: positive twist increases volume, negative twist decreases it. A 90° twist changes volume by 50 percentage points. One learned single finger tap or Lock volume ends adjustment.")
+                Text("Looking back or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust.")
+                Text("Control target shows the only command destination. Connect or Disconnect controls Wizardry routing, not Apple Bluetooth pairing. Computer commands always travel through the paired iPhone. Computer studio is a separate sensor-recording connection; actions are disabled while recording.")
                 Text("Computer controls the paired receiver. Phone uses an experimental native volume-slider bridge: keep Wizardry open on iPhone with its volume slider visible. Both use current-volume readback; no Shortcut is needed for live Phone adjustment.")
                 Text("Manual control").font(.headline)
                 Text("Tap Arm, hold still looking at the Watch for the ready haptic, then extend or make your action.")
@@ -107,9 +115,31 @@ struct ContentView: View {
     }
 }
 
+private struct WatchConnectionCard: View {
+    @ObservedObject var motion: MotionController
+    @ObservedObject var link: WatchLink
+    var body: some View {
+        VStack(spacing:5) {
+            Label(link.reachable ? "iPhone link online" : "iPhone link offline",systemImage:"iphone.radiowaves.left.and.right")
+                .foregroundStyle(link.reachable ? .green : .orange)
+            Text("Control target: \(motion.configuration.selectedProfile.name)").bold()
+            Text(!motion.configuration.allowsControl ? "Disconnected" : motion.connectionMessage)
+                .multilineTextAlignment(.center)
+            Picker("Choose target",selection:Binding(get:{motion.configuration.selectedProfileID},set:{motion.connectTarget($0)})) {
+                ForEach(motion.configuration.profiles) { Text($0.name).tag($0.id) }
+            }.disabled(motion.connectionBusy || motion.studioRecording)
+            HStack {
+                Button("Connect") { motion.connectTarget(motion.configuration.selectedProfileID) }
+                Button("Disconnect") { motion.disconnectTarget() }
+            }.disabled(motion.connectionBusy || motion.studioRecording)
+            Button("Refresh status") { motion.refreshConnection() }.disabled(motion.connectionBusy)
+        }.font(.caption2).padding(6).background(.purple.opacity(0.12),in:RoundedRectangle(cornerRadius:8))
+    }
+}
+
 private struct VolumeStatusView: View {
     @ObservedObject var remote: LiveVolumeRemote
-    let feedback: VolumeMotionFeedback?
+    let feedback: TwistVolumeFeedback?
     let tapStatus: String
     let lock: () -> Void
     var body: some View {
@@ -127,8 +157,9 @@ private struct VolumeStatusView: View {
                     Text(String(format:"Started %.0f%% · change %+.1f",feedback.startingVolume*100,
                                 ((remote.requested ?? feedback.startingVolume)-feedback.startingVolume)*100))
                         .font(.caption2.monospacedDigit())
-                    Label(feedback.velocity > 0.01 ? "Raising ↑" : feedback.velocity < -0.01 ? "Lowering ↓" : "Holding",
-                          systemImage:"hand.raised").font(.caption2)
+                    Text(String(format:"Twist %+.0f°",feedback.twistRadians*180 / .pi)).font(.caption2.monospacedDigit())
+                    Label(feedback.angularVelocity > 0.02 ? "Twist + · louder" : feedback.angularVelocity < -0.02 ? "Twist − · quieter" : "Holding",
+                          systemImage:"dial.low").font(.caption2)
                 }
                 if remote.state == .adjusting {
                     Text(tapStatus).font(.caption2)

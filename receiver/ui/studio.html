@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Wizardry · Motion studio</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/studio.css">
+  <script src="/studio.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">✦</span><div>Wizardry<span class="eyebrow">MOTION STUDIO</span></div></a>
+    <span id="studio-connection" class="connection"><i></i><span id="studio-connection-label">Connecting to receiver</span></span>
+  </header>
+  <nav class="studio-nav" aria-label="Receiver pages"><a href="/">Volume</a><a href="/studio">Live sensors</a><a href="/recordings">Record movements</a><a href="/mappings">Map movements</a></nav>
+  <section class="intro"><div><p class="eyebrow">MAKE THE MOVEMENT VISIBLE</p><h1 id="page-title">Live sensors</h1><p id="page-description">Every available motion channel, directly from your Watch.</p></div><span id="stream-badge" class="mode">Stream stopped</span></section>
+  <p id="studio-message" class="notice" role="status" hidden></p>
+  <section class="panel stream-controls" aria-label="Sensor connection">
+    <div><h2>Watch → iPhone → computer</h2><p id="stream-detail">On iPhone, connect the computer receiver and enable Computer studio. Keep both apps open.</p></div>
+    <div class="control-actions"><button id="start-stream" class="primary" type="button">Start sensors</button><button id="stop-stream" type="button" disabled>Stop sensors</button></div>
+  </section>
+  <div class="sensor-stats"><div><span>Received sample rate</span><strong id="sample-rate">—</strong></div><div><span>Last sample</span><strong id="last-sample">—</strong></div><div><span>Missing batches</span><strong id="missing-batches">0</strong></div><div><span>Reported dropped samples</span><strong id="dropped-samples">0</strong></div></div>
+
+  <section id="sensors-page" aria-label="Live motion graphs">
+    <p class="muted">Graphs show the last 10 seconds. Recordings save every received sample at its original timestamp. Empty channels mean the Watch has not supplied that sensor.</p>
+    <div id="sensor-charts" class="sensor-grid"></div>
+    <p class="muted">Acceleration and gravity: g · rotation rate: rad/s · attitude: radians · magnetic field: µT · quaternion: unitless. Raw accelerometer and fused motion have separate timestamps. Requested 100 Hz is not a hardware-rate guarantee.</p>
+  </section>
+
+  <section id="recordings-page" hidden>
+    <div class="studio-columns">
+      <section class="panel" aria-labelledby="movement-title"><div class="panel-top"><h2 id="movement-title">Your movements</h2><span id="movement-count" class="subtle">0 saved</span></div><p class="muted">Give each movement one clear name, then record several examples.</p>
+        <form id="movement-form"><label for="movement-name">Movement name</label><div class="input-row"><input id="movement-name" maxlength="80" placeholder="e.g. Turn a page" required><button type="submit" class="primary">Create</button></div></form>
+        <label for="recording-movement">Movement to record</label><select id="recording-movement"><option value="">Create a movement first</option></select>
+        <div class="capture-status"><span id="recording-dot" class="recording-dot"></span><strong id="recording-status">Ready to record</strong><span id="recording-time">Up to 60 seconds</span></div>
+        <p id="recording-detail" class="muted">Start sensors and wait for live samples. During recording, Watch gestures are captured for the library; actions are paused.</p>
+        <div class="control-actions"><button id="record-start" type="button" class="primary" disabled>Record example</button><button id="record-stop" type="button" disabled>Stop & save</button><button id="record-cancel" type="button" disabled>Cancel</button></div>
+        <p class="muted">Saved on this computer in receiver/data. A recording with gaps is marked partial, so it can be reviewed before future training.</p>
+      </section>
+      <section class="panel" aria-labelledby="saved-title"><div class="panel-top"><h2 id="saved-title">Saved examples</h2><span id="recording-count" class="subtle">0 recordings</span></div><div id="recording-list" class="recording-list"><p class="empty-state">Your recordings will appear here.</p></div></section>
+    </div>
+    <aside class="studio-note">This is a collection workspace. Saving examples does not train or enable a recognizer. Custom movements remain inactive until a future training step.</aside>
+  </section>
+
+  <section id="mappings-page" hidden>
+    <div class="studio-columns">
+      <section class="panel" aria-labelledby="builtin-title"><h2 id="builtin-title">Existing Watch actions</h2><p class="muted">Edit the same Computer and Phone mappings as the iPhone app. Edits sync through the connected iPhone. Edit Home targets on iPhone.</p>
+        <form id="builtin-form"><label for="mapping-profile">Profile to edit</label><select id="mapping-profile"><option value="">Waiting for iPhone settings</option></select><label for="mapping-gesture">Movement</label><select id="mapping-gesture"></select><label for="mapping-action">Action</label><select id="mapping-action"></select><label class="check-row"><input id="mapping-enabled" type="checkbox" checked> Enabled</label><div id="mapping-shortcut-row" hidden><label for="mapping-shortcut">Exact Shortcut name</label><input id="mapping-shortcut" maxlength="200"></div><p id="mapping-target" class="muted"></p><button id="mapping-save" type="submit" class="primary" disabled>Save to iPhone & Watch</button></form><p id="mapping-status" class="muted" role="status">Waiting for iPhone settings</p>
+      </section>
+      <section class="panel" aria-labelledby="custom-title"><h2 id="custom-title">Custom movement plans</h2><p class="muted">Choose what your recorded movement should do after it is trained. These mappings are saved locally and are not active.</p>
+        <form id="custom-form"><label for="custom-movement">Recorded movement</label><select id="custom-movement"><option value="">Create a movement on Record movements</option></select><label for="custom-action">Planned action</label><select id="custom-action"></select><div id="custom-shortcut-row" hidden><label for="custom-shortcut">Exact Shortcut name</label><input id="custom-shortcut" maxlength="256"></div><button id="custom-save" class="primary" type="submit" disabled>Save inactive mapping</button></form><p class="inactive-label">Untrained · inactive</p>
+      </section>
+    </div>
+  </section>
+  <footer><p><span class="footer-dot"></span>Local motion studio <span class="footer-divider">/</span>No pairing credentials in this browser</p><p id="sensor-origin">Waiting for Watch metadata</p></footer>
+</main>
+</body>
+</html>

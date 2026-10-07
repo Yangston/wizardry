@@ -26,6 +26,8 @@ struct ExtensionArbiter {
     private var stableYaw: Double?
     private var stableSince: Double?
     private var lastTime: Double?
+    private var needsRebase = false
+    static let entryAngle = 55 * Double.pi/180
     private(set) var relativeYaw = 0.0
     var angle: Double { abs(relativeYaw) }
     mutating func calibrate(yaw: Double) {
@@ -41,18 +43,30 @@ struct ExtensionArbiter {
     func isViewing(yaw: Double) -> Bool {
         yawOffset(yaw).map {abs($0) < 25 * .pi/180} ?? false
     }
-    mutating func interruptMotion() { stableYaw = nil; stableSince = nil; lastTime = nil }
+    mutating func interruptMotion() {
+        stableYaw = nil; stableSince = nil; lastTime = nil; needsRebase = true
+    }
     mutating func update(yaw: Double, acceleration: Double, rotation: Double, time: Double) -> Route {
         guard let offset = yawOffset(yaw),
               [acceleration,rotation,time].allSatisfy(\.isFinite), acceleration >= 0, rotation >= 0 else {
             interruptMotion(); return .transition
         }
-        if let previous = lastTime {
-            if time <= previous { stableYaw = nil; stableSince = nil; return .transition }
-            if time-previous > 0.25 { stableYaw = nil; stableSince = nil }
+        if let previous = lastTime, time <= previous {
+            stableYaw = nil; stableSince = nil; return .transition
         }
+        let gap = lastTime.map { time-$0 > 0.25 } ?? false
         lastTime = time
         relativeYaw = offset
+        if gap || needsRebase {
+            stableYaw = nil; stableSince = nil; needsRebase = false
+            return .transition
+        }
+        // Claim extension on the first fresh sample crossing 55 degrees. Entry
+        // does not wait for the arm to stop or require a particular rotation rate.
+        if angle + 0.000000001 >= Self.entryAngle { return .enterVolume }
+        if angle >= 25 * .pi/180 {
+            stableYaw = nil; stableSince = nil; return .transition
+        }
         // Shakes near the viewing pose retain their existing discrete recognizer.
         if angle < 25 * .pi/180, rotation < 0.8, acceleration >= 0.1 { return .legacy }
         guard acceleration < 0.1, rotation < 0.2 else {
@@ -62,68 +76,53 @@ struct ExtensionArbiter {
             stableYaw = yaw; stableSince = time
         }
         guard time - (stableSince ?? time) >= 0.25 else { return .transition }
-        return (70 * .pi/180...110 * .pi/180).contains(angle) ? .enterVolume : .legacy
+        return .legacy
     }
 }
 
-/// Short, from-rest strokes only: apparent rest is a heuristic, not a measured
-/// position reference. Pauses reset velocity without moving the volume anchor.
-struct VerticalVolumeTracker {
+/// A relative roll knob anchored to actual volume at entry. Each signed, wrapped
+/// increment changes volume immediately: 180 degrees spans the full volume range.
+struct TwistVolumeTracker {
     private(set) var target = 0.0
     private(set) var startingVolume = 0.0
-    private(set) var controlTravel = 0.0
-    private(set) var controlAcceleration = 0.0
-    private(set) var velocity = 0.0
+    private(set) var twistRadians = 0.0
+    private(set) var angularVelocity = 0.0
+    private var lastRoll: Double?
     private var lastTime: Double?
-    private var stillSince: Double?
-    private var bias = 0.0
-    private var filtered = 0.0
-    private var pendingDistance = 0.0
-    mutating func begin(volume: Double, acceleration: MotionVector, gravity: MotionVector, time: Double) {
-        self = Self(); target = min(1,max(0,volume)); startingVolume = target; lastTime = time
-        bias = Self.vertical(acceleration,gravity)
+    mutating func begin(volume: Double, roll: Double, time: Double) {
+        self = Self()
+        target = volume.isFinite ? min(1,max(0,volume)) : 0
+        startingVolume = target
+        freeze(roll:roll,time:time)
     }
-    static func vertical(_ acceleration: MotionVector, _ gravity: MotionVector) -> Double {
-        guard gravity.length > 0.5 else { return 0 }
-        return -acceleration.dot(gravity)/gravity.length * 9.80665
-    }
-    mutating func freeze(at time: Double) {
-        lastTime = time; velocity = 0; filtered = 0; controlAcceleration = 0; pendingDistance = 0; stillSince = nil
-    }
-    mutating func update(acceleration: MotionVector, gravity: MotionVector, rotation: Double, time: Double, frozen: Bool = false) -> Double {
-        guard acceleration.isFinite, gravity.isFinite, gravity.length > 0.5,
-              rotation.isFinite, time.isFinite, let previous = lastTime,
-              time > previous, time-previous <= 0.25 else { freeze(at:time); return target }
-        let dt = time-previous; lastTime = time
-        if frozen { freeze(at:time); return target }
-        let apparentRest = acceleration.length < 0.035 && rotation < 0.2
-        if apparentRest {
-            if stillSince == nil { stillSince = time }
-            if time-(stillSince ?? time) >= 0.3 {
-                velocity = 0; filtered = 0; controlAcceleration = 0; pendingDistance = 0
-                bias += 0.02*(Self.vertical(acceleration,gravity)-bias)
-                return target
-            }
-        } else { stillSince = nil }
-        let raw = Self.vertical(acceleration,gravity)-bias
-        controlAcceleration = -raw
-        filtered += dt/(0.02+dt)*(raw-filtered)
-        let value = abs(filtered) < 0.12 ? 0 : filtered
-        let oldVelocity = velocity
-        velocity = min(1.5,max(-1.5,velocity+value*dt))
-        pendingDistance += (oldVelocity+velocity)*0.5*dt
-        // Flip the previous mapping to match the user's observed raise/lower
-        // direction. Travel is signed in the volume-control direction, not a
-        // measured absolute world height. 1 metre = 100 percentage points.
-        if abs(pendingDistance) >= 0.001 {
-            let change = -pendingDistance
-            controlTravel += change
-            target = min(1,max(0,target+change)); pendingDistance = 0
+    mutating func freeze(roll: Double, time: Double) {
+        angularVelocity = 0
+        guard roll.isFinite, time.isFinite else {
+            lastRoll = nil; lastTime = nil; return
         }
-        return target
+        lastRoll = roll; lastTime = time
     }
-    var feedback: VolumeMotionFeedback {
-        .init(startingVolume:startingVolume,travel:controlTravel,velocity:-velocity,acceleration:controlAcceleration)
+    mutating func update(roll: Double, time: Double, frozen: Bool = false) -> Double {
+        guard roll.isFinite, time.isFinite else {
+            lastRoll = nil; lastTime = nil; angularVelocity = 0; return target
+        }
+        guard let previousTime = lastTime, let previousRoll = lastRoll else {
+            freeze(roll:roll,time:time); return target
+        }
+        guard time > previousTime else {
+            lastRoll = nil; lastTime = nil; angularVelocity = 0; return target
+        }
+        guard time-previousTime <= 0.25, !frozen else {
+            freeze(roll:roll,time:time); return target
+        }
+        let delta = ExtensionArbiter.offset(roll,from:previousRoll)
+        angularVelocity = delta/(time-previousTime)
+        twistRadians += delta
+        // Clamp each increment, so turning back from a limit responds at once
+        // even after further outward rotation. There is no accumulated windup.
+        target = min(1,max(0,target+delta / .pi))
+        lastRoll = roll; lastTime = time
+        return target
     }
 }
 
@@ -136,8 +135,10 @@ struct VolumeRequest: Codable, Equatable {
     var createdAt = Date().timeIntervalSince1970
     var operation: Operation
     var target: Double?
+    var profileID: String? = nil
     var isValid: Bool {
         createdAt.isFinite && sequence >= 0 && !revision.isEmpty &&
+        (profileID.map { ["computer","phone"].contains($0) } ?? true) &&
         (operation == .begin ? sequence == 0 && target == nil : sequence > 0 &&
          (target.map({$0.isFinite && (0...1).contains($0)}) ?? false))
     }
@@ -169,9 +170,10 @@ struct VolumeCommandGate {
     mutating func accept(_ request: VolumeRequest, configuration: WizardryConfiguration, now: Double) -> Bool {
         closed = closed.filter { now-$0.value < 1800 }
         seen = seen.filter { now-$0.value < 30 }
-        guard request.isValid, now.isFinite, request.createdAt <= now+0.1,
+        guard configuration.allowsControl, request.isValid, now.isFinite, request.createdAt <= now+0.1,
               now-request.createdAt <= 1, request.revision == configuration.revision,
-              configuration.supportsLiveVolume, seen[request.id] == nil,
+              configuration.supportsLiveVolume, request.profileID.map({$0 == configuration.selectedProfileID}) ?? true,
+              seen[request.id] == nil,
               closed[request.sessionID] == nil else { return false }
         if request.operation == .begin {
             if let active { closed[active] = now }
@@ -193,6 +195,13 @@ struct VolumeCommandGate {
 /// Readback acknowledges the actual system level, allowing small slider
 /// rounding differences. An unchanged or invalid reading cannot confirm a move.
 enum VolumeReadback {
+    static func confirms(actual: Double, target: Double, previous: Double) -> Bool {
+        guard confirms(actual:actual,target:target), previous.isFinite, (0...1).contains(previous) else { return false }
+        let requestedChange = target-previous
+        guard abs(requestedChange) >= 0.001 else { return true }
+        let actualChange = actual-previous
+        return actualChange*requestedChange > 0 && abs(actualChange) >= min(abs(requestedChange),0.0001)
+    }
     static func confirms(actual: Double, target: Double) -> Bool {
         actual.isFinite && target.isFinite && (0...1).contains(actual) &&
         (0...1).contains(target) && abs(actual-target) <= 0.01

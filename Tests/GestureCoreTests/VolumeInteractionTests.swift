@@ -2,22 +2,18 @@ import XCTest
 @testable import GestureCore
 
 final class VolumeInteractionTests: XCTestCase {
-    private let zero = MotionVector(x:0,y:0,z:0)
-    private let gravity = MotionVector(x:0,y:0,z:-1)
     private func pose(_ radians: Double) -> MotionQuaternion {
         .init(x:sin(radians/2),y:0,z:0,w:cos(radians/2))
     }
-    func testYawEntryRequiresSettlingFromAnyHeadingOnEitherWrist() {
+    func testYawEntryCrossesFiftyFiveImmediatelyFromAnyHeadingOnEitherWrist() {
         for origin in [0.0,0.7,3.13,-3.13] {
             for sign in [-1.0,1.0] {
                 var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:origin)
-                let extended = ExtensionArbiter.offset(origin + sign * .pi/2,from:0)
-                XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:1,time:0),.transition)
-                for time in [0.1,0.2,0.3] {
-                    XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:0,time:time),.transition)
-                }
-                XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0,rotation:0,time:0.36),.enterVolume)
-                XCTAssertEqual(arbiter.relativeYaw,sign * .pi/2,accuracy:0.00001)
+                let before = ExtensionArbiter.offset(origin + sign * 54.9 * .pi/180,from:0)
+                let extended = ExtensionArbiter.offset(origin + sign * 55 * .pi/180,from:0)
+                XCTAssertEqual(arbiter.update(yaw:before,acceleration:0.8,rotation:3,time:0),.transition)
+                XCTAssertEqual(arbiter.update(yaw:extended,acceleration:0.8,rotation:3,time:0.01),.enterVolume)
+                XCTAssertEqual(arbiter.relativeYaw,sign * 55 * .pi/180,accuracy:0.00001)
                 XCTAssertTrue(arbiter.isViewing(yaw:origin+0.1))
                 XCTAssertFalse(arbiter.isViewing(yaw:extended))
             }
@@ -28,8 +24,7 @@ final class VolumeInteractionTests: XCTestCase {
         let turned = MotionQuaternion(x:0,y:0,z:sin(.pi/4),w:cos(.pi/4))
         XCTAssertEqual(initial.normal,turned.normal) // regression: old detector missed this
         var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
-        for time in [0.0,0.1,0.2] { XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:time),.transition) }
-        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0.26),.enterVolume)
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:2,time:0),.enterVolume)
         XCTAssertFalse(arbiter.isViewing(yaw:.pi/2)) // must not immediately stop volume
         XCTAssertTrue(arbiter.isViewing(yaw:0))
     }
@@ -58,81 +53,26 @@ final class VolumeInteractionTests: XCTestCase {
         XCTAssertNil(arbiter.yawOffset(0))
         XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0),.transition)
     }
-    func testGapDuplicateAndInvalidSamplesRequireFreshSettling() {
+    func testGapDuplicateAndInvalidSamplesCannotEnterVolume() {
         var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
         _ = arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:0)
         XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1),.transition)
         XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1),.transition)
         XCTAssertEqual(arbiter.update(yaw:.nan,acceleration:0,rotation:0,time:1.1),.transition)
-        for time in [1.2,1.3,1.4] { XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:time),.transition) }
-        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1.46),.enterVolume)
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:0,time:1.2),.transition)
+        XCTAssertEqual(arbiter.update(yaw:.pi/2,acceleration:0,rotation:3,time:1.21),.enterVolume)
     }
-    func testVerticalProjectionReversalsPauseAndBounds() {
-        XCTAssertEqual(VerticalVolumeTracker.vertical(.init(x:0,y:0,z:0.1),gravity),0.980665,accuracy:0.00001)
-        XCTAssertEqual(VerticalVolumeTracker.vertical(.init(x:0.1,y:0,z:0),gravity),0,accuracy:0.00001)
-        var tracker = VerticalVolumeTracker()
-        tracker.begin(volume:0.5,acceleration:zero,gravity:gravity,time:0)
-        for i in 1...20 { _ = tracker.update(acceleration:.init(x:0,y:0,z:0.1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertLessThan(tracker.target,0.5) // opposite of the previous mapping
-        for i in 21...100 { _ = tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertEqual(tracker.velocity,0)
-        let held = tracker.target
-        for i in 101...600 { _ = tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertEqual(tracker.target,held)
-        for i in 601...620 { _ = tracker.update(acceleration:.init(x:0,y:0,z:-0.1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertGreaterThan(tracker.target,held)
-        for i in 621...900 { _ = tracker.update(acceleration:.init(x:0,y:0,z:-1),gravity:gravity,rotation:0,time:Double(i)*0.01) }
-        XCTAssertEqual(tracker.target,1)
-        tracker.begin(volume:0.12,acceleration:zero,gravity:gravity,time:10)
-        for i in 1...300 { _ = tracker.update(acceleration:.init(x:0,y:0,z:1),gravity:gravity,rotation:0,time:10+Double(i)*0.01) }
-        XCTAssertEqual(tracker.target,0)
-    }
-    func testFlippedStrokesAnchorToCurrentVolumeAndChangeGraduallyAtDeliveredRates() {
-        for rate in [50.0,100.0] {
-            for initial in [0.12,0.37,0.83] {
-                for direction in [-1.0,1.0] {
-                    var tracker = VerticalVolumeTracker()
-                    tracker.begin(volume:initial,acceleration:zero,gravity:gravity,time:0)
-                    XCTAssertEqual(tracker.target,initial)
-                    XCTAssertEqual(tracker.feedback.startingVolume,initial)
-                    XCTAssertEqual(tracker.feedback.travel,0)
-                    var previous = initial
-                    for i in 1...Int(rate*0.2) {
-                        let value = tracker.update(acceleration:.init(x:0,y:0,z:direction*0.1),gravity:gravity,
-                                                   rotation:0,time:Double(i)/rate)
-                        // A stroke changes the current level incrementally; it
-                        // never jumps to an absolute height-derived percentage.
-                        XCTAssertLessThan(abs(value-previous),0.01)
-                        if direction < 0 { XCTAssertGreaterThanOrEqual(value,previous) }
-                        else { XCTAssertLessThanOrEqual(value,previous) }
-                        previous = value
-                    }
-                    if direction < 0 {
-                        XCTAssertGreaterThan(tracker.target,initial)
-                        XCTAssertGreaterThan(tracker.feedback.travel,0)
-                        XCTAssertGreaterThan(tracker.feedback.velocity,0)
-                    } else {
-                        XCTAssertLessThan(tracker.target,initial)
-                        XCTAssertLessThan(tracker.feedback.travel,0)
-                        XCTAssertLessThan(tracker.feedback.velocity,0)
-                    }
-                    let held = tracker.target, travel = tracker.feedback.travel
-                    tracker.freeze(at:0.3)
-                    XCTAssertEqual(tracker.target,held)
-                    XCTAssertEqual(tracker.feedback.travel,travel)
-                    XCTAssertEqual(tracker.feedback.velocity,0)
-                }
+    func testEntryHasNoUpperAngleCutoffAndExtensionProgressKeepsPriority() {
+        for degrees in [55.0,90,120,179] {
+            for sign in [-1.0,1.0] {
+                var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
+                XCTAssertEqual(arbiter.update(yaw:sign*degrees * .pi/180,acceleration:0.2,rotation:4,time:0),.enterVolume)
             }
         }
-    }
-    func testTapFreezeAndDeliveryGapNeverIntegrateImpulse() {
-        var tracker = VerticalVolumeTracker()
-        tracker.begin(volume:0.3,acceleration:zero,gravity:gravity,time:0)
-        _ = tracker.update(acceleration:.init(x:0,y:0,z:2),gravity:gravity,rotation:0,time:0.01,frozen:true)
-        XCTAssertEqual(tracker.target,0.3)
-        _ = tracker.update(acceleration:.init(x:0,y:0,z:2),gravity:gravity,rotation:0,time:1)
-        XCTAssertEqual(tracker.target,0.3)
-        XCTAssertEqual(tracker.velocity,0)
+        var arbiter = ExtensionArbiter(); arbiter.calibrate(yaw:0)
+        for i in 0...100 {
+            XCTAssertEqual(arbiter.update(yaw:45 * .pi/180,acceleration:0,rotation:0,time:Double(i)/100),.transition)
+        }
     }
     func testVolumeGateRejectsOldRevisionExpiryOrderingAndClosedSessions() {
         let configuration = WizardryConfiguration()
@@ -166,17 +106,6 @@ final class VolumeInteractionTests: XCTestCase {
         XCTAssertFalse(engine.isArmed)
     }
 
-    func testThirtySecondStationaryHoldPreservesTargetAndNextStroke() {
-        var tracker = VerticalVolumeTracker()
-        tracker.begin(volume:0.37,acceleration:zero,gravity:gravity,time:0)
-        for i in 1...3000 {
-            XCTAssertEqual(tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)/100),0.37,accuracy:0.000001)
-        }
-        for i in 3001...3020 {
-            _ = tracker.update(acceleration:.init(x:0,y:0,z:-0.1),gravity:gravity,rotation:0,time:Double(i)/100)
-        }
-        XCTAssertGreaterThan(tracker.target,0.37)
-    }
     func testPhoneVolumeUsesTheSameOrderedExpiringSessionAndCannotCrossProfiles() {
         var configuration = WizardryConfiguration(); configuration.selectedProfileID = "phone"
         XCTAssertTrue(configuration.supportsLiveVolume)

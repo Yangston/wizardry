@@ -6,6 +6,8 @@ struct CapturedMotion {
     var callbackTime: Double; var rawHz: Double
     var attitude: MotionQuaternion
     var acceleration: MotionVector; var rotation: MotionVector; var gravity: MotionVector
+    var rawAcceleration: MotionVector?; var rawTime: Double?
+    var magnetic: MotionVector?; var magneticAccuracy: Int
 }
 
 /// All feature extraction, template matching and enrollment operate on the
@@ -25,6 +27,8 @@ final class MotionCapture: @unchecked Sendable {
     private var enrollmentSamples = 0
     private var enrollmentFirstSample: Double?
     private var rawTimes: [Double] = []
+    private var latestRaw: MotionVector?
+    private var latestRawTime: Double?
     var motionDelivered: ((CapturedMotion) -> Void)?
     var tapDelivered: ((FingerTapDetector.Output) -> Void)?
     var enrollmentDelivered: ((TapEnrollment, Bool) -> Void)?
@@ -48,10 +52,15 @@ final class MotionCapture: @unchecked Sendable {
         let a = motion.userAcceleration, r = motion.rotationRate, g = motion.gravity, q = motion.attitude.quaternion
         rotation = .init(x:r.x,y:r.y,z:r.z); rotationTime = motion.timestamp
         let rate = rawTimes.count > 1 ? Double(rawTimes.count-1)/max(0.001,(rawTimes.last ?? 0)-(rawTimes.first ?? 0)) : 0
+        let magnetic = motion.magneticField
+        let rawIsFresh = latestRawTime.map {abs(motion.timestamp-$0) <= 0.1} ?? false
         motionDelivered?(.init(time:motion.timestamp,roll:motion.attitude.roll,pitch:motion.attitude.pitch,yaw:motion.attitude.yaw,
                               callbackTime:ProcessInfo.processInfo.systemUptime,rawHz:rate,
                               attitude:.init(x:q.x,y:q.y,z:q.z,w:q.w),acceleration:.init(x:a.x,y:a.y,z:a.z),
-                              rotation:rotation,gravity:.init(x:g.x,y:g.y,z:g.z)))
+                              rotation:rotation,gravity:.init(x:g.x,y:g.y,z:g.z),
+                              rawAcceleration:rawIsFresh ? latestRaw : nil,rawTime:rawIsFresh ? latestRawTime : nil,
+                              magnetic:magnetic.accuracy == .uncalibrated ? nil : .init(x:magnetic.field.x,y:magnetic.field.y,z:magnetic.field.z),
+                              magneticAccuracy:Int(magnetic.accuracy.rawValue)))
     }
     func accept(_ sample: CMAccelerometerData) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -65,6 +74,8 @@ final class MotionCapture: @unchecked Sendable {
             }
             return
         }
+        latestRaw = .init(x:sample.acceleration.x,y:sample.acceleration.y,z:sample.acceleration.z)
+        latestRawTime = sample.timestamp
         // Stale gyro data cannot be matched against a tap template.
         guard sample.timestamp-rotationTime >= -0.03, sample.timestamp-rotationTime <= 0.1 else { return }
         let a = sample.acceleration

@@ -15,6 +15,7 @@ import time
 import uuid
 from live_volume import LiveVolumeProcessor
 from dashboard import DashboardState, start_dashboard
+from studio import MotionStudio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 KEY_CODES = {"volume_up": 0xAF, "volume_down": 0xAE, "mute": 0xAD,
@@ -57,7 +58,7 @@ def pairing_token_file(path):
 
 
 class CommandProcessor:
-    def __init__(self, token, execute=False, clock=time.time, volume_action=None, pacing_clock=None):
+    def __init__(self, token, execute=False, clock=time.time, volume_action=None, pacing_clock=None, data_dir=None):
         if len(token) < 16:
             raise ValueError("WIZARDRY_TOKEN must contain at least 16 characters")
         self.token = token
@@ -68,6 +69,13 @@ class CommandProcessor:
         self.last_action = float("-inf")
         self.live_volume = LiveVolumeProcessor(execute=execute, clock=clock, pacing_clock=pacing_clock)
         self.dashboard = DashboardState(execute=execute, clock=clock)
+        self.studio = MotionStudio(data_dir=data_dir, clock=clock)
+        self.dashboard.studio = self.studio
+
+    def handle_studio(self, authorization, payload, telemetry=False):
+        if not hmac.compare_digest(authorization.encode(), ("Bearer " + self.token).encode()):
+            return 401, {"error": "Unauthorized"}
+        return self.studio.ingest(payload) if telemetry else self.studio.poll(payload)
 
     def handle_volume(self, authorization, payload):
         if not hmac.compare_digest(authorization.encode(), ("Bearer " + self.token).encode()):
@@ -115,6 +123,7 @@ class CommandProcessor:
             reply["serverTime"] = self.clock()
             reply["liveVolume"] = True
             reply["liveVolumeProtocol"] = 2
+            reply["studioProtocol"] = 1
         self.dashboard.command(command, executed)
         return 200, reply
 
@@ -130,21 +139,26 @@ def windows_volume(command):
 def handler_for(processor):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path not in ("/command", "/volume"):
+            if self.path not in ("/command", "/volume", "/studio", "/telemetry"):
                 self.reply(404, {"error": "Not found"})
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length <= 0 or length > 2048:
-                    self.reply(413, {"error": "Body must be 1–2048 bytes"})
+                limit = 262144 if self.path in ("/studio", "/telemetry") else 2048
+                if length <= 0 or length > limit:
+                    self.reply(413, {"error": f"Body must be 1-{limit} bytes"})
                     return
                 payload = json.loads(self.rfile.read(length))
             except (ValueError, UnicodeDecodeError):
                 self.reply(400, {"error": "Invalid JSON"})
                 return
             try:
-                dispatch = processor.handle_volume if self.path == "/volume" else processor.handle
-                status, body = dispatch(self.headers.get("Authorization", ""), payload)
+                if self.path in ("/studio", "/telemetry"):
+                    status, body = processor.handle_studio(self.headers.get("Authorization", ""), payload,
+                                                         telemetry=self.path == "/telemetry")
+                else:
+                    dispatch = processor.handle_volume if self.path == "/volume" else processor.handle
+                    status, body = dispatch(self.headers.get("Authorization", ""), payload)
             except Exception:
                 self.reply(500, {"error": "Command execution failed"})
                 return
@@ -191,7 +205,7 @@ def main():
     try:
         token = (pairing_token_file(args.token_file) if args.token_file else
                  secrets.token_urlsafe(24) if args.pair else os.environ.get("WIZARDRY_TOKEN", ""))
-        processor = CommandProcessor(token, args.execute)
+        processor = CommandProcessor(token, args.execute, data_dir=Path(__file__).with_name("data"))
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         # Avoid including token-file contents or subprocess output in errors.
         parser.error(str(error) if not args.token_file else "Could not load/create the private pairing token file. Check the file and its permissions; it was not rotated.")

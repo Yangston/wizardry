@@ -11,9 +11,15 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
     var volumeReceived: ((VolumeRequest, @escaping (VolumeReply) -> Void) -> Void)?
     var framesReceived: (([MotionFrame]) -> Void)?
     var diagnosticsReceived: ((InteractionDiagnosticsSnapshot) -> Void)?
+    var configurationAcknowledged: ((String) -> Void)?
+    var controlRequestReceived: ((ControlConnectionRequest, @escaping (ControlConnectionReply) -> Void) -> Void)?
+    var sensorBatchReceived: ((SensorBatch) -> Void)?
+    var studioRequestReceived: ((Bool, Double) -> Bool)?
     var activated: (() -> Void)?
     private(set) var streamUntil = 0.0
     private var telemetryInFlight = false
+    private var sensorBatchInFlight: UUID?
+    private var lastStudioRequestTime = -Double.infinity
     private var session: WCSession?
 
     override init() {
@@ -28,6 +34,45 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
               let session, session.activationState == .activated else { return }
         do { try session.updateApplicationContext(["configuration":data]); status = "Settings queued · watch applies them when connected" }
         catch { status = "Settings sync failed: \(error.localizedDescription)" }
+        if session.isReachable {
+            session.sendMessage(["configuration":data],replyHandler:{ [weak self] reply in
+                guard let revision = reply["configurationRevision"] as? String, revision == configuration.revision else { return }
+                Task { @MainActor in self?.configurationAcknowledged?(revision) }
+            },errorHandler:{ _ in })
+        }
+    }
+    func requestControl(_ request: ControlConnectionRequest, completion: @escaping (Result<ControlConnectionReply,Error>) -> Void) {
+        guard request.isValid, let session, session.activationState == .activated, session.isReachable,
+              let data = try? JSONEncoder().encode(request) else {
+            completion(.failure(NSError(domain:"Wizardry",code:1,userInfo:[NSLocalizedDescriptionKey:"iPhone link offline. Open Wizardry on your iPhone."]))); return
+        }
+        session.sendMessage(["controlConnection":data],replyHandler:{ reply in
+            let value = (reply["controlConnectionReply"] as? Data).flatMap {try? JSONDecoder().decode(ControlConnectionReply.self,from:$0)}
+            Task { @MainActor in
+                if let value, value.id == request.id, value.isValid { completion(.success(value)) }
+                else { completion(.failure(NSError(domain:"Wizardry",code:2,userInfo:[NSLocalizedDescriptionKey:"Update both Wizardry apps to confirm the control target."]))) }
+            }
+        },errorHandler:{ error in Task { @MainActor in completion(.failure(error)) } })
+    }
+    func requestStudio(until: Double, recording: Bool, completion: @escaping (Bool) -> Void) {
+        guard until.isFinite, let session, session.isReachable else { completion(false); return }
+        session.sendMessage(["studioUntil":until,"studioRecording":recording,"studioIssuedAt":Date().timeIntervalSince1970],replyHandler:{ reply in
+            let accepted = reply["studioRecording"] as? Bool == recording && reply["studioAccepted"] as? Bool == true
+            Task { @MainActor in completion(accepted) }
+        },errorHandler:{ _ in Task { @MainActor in completion(false) } })
+    }
+    /// One bounded sample batch on the link. Rejected samples are counted by
+    /// the capture owner, rather than hidden or replayed after reconnection.
+    func sendSensorBatch(_ batch: SensorBatch) -> Bool {
+        guard sensorBatchInFlight == nil, batch.isValid, let session, session.isReachable,
+              let data = try? JSONEncoder().encode(batch), data.count <= 200_000 else { return false }
+        let ticket = UUID(); sensorBatchInFlight = ticket
+        session.sendMessage(["sensorBatch":data],replyHandler:{ [weak self] _ in
+            Task { @MainActor in if self?.sensorBatchInFlight == ticket { self?.sensorBatchInFlight = nil } }
+        },errorHandler:{ [weak self] _ in
+            Task { @MainActor in if self?.sensorBatchInFlight == ticket { self?.sensorBatchInFlight = nil } }
+        })
+        return true
     }
     func requestStream() {
         guard let session, session.isReachable else { return }
@@ -118,11 +163,38 @@ final class WatchLink: NSObject, ObservableObject, WCSessionDelegate {
     }
     private func receive(_ message: [String:Any], reply: (([String:Any])->Void)?) {
         #if os(watchOS)
+        if let data = message["configuration"] as? Data,
+           let config = try? JSONDecoder().decode(WizardryConfiguration.self,from:data), config.isValid {
+            configurationReceived?(config); reply?(["configurationRevision":config.revision]); return
+        }
+        if let until = message["studioUntil"] as? Double, until.isFinite {
+            let now = Date().timeIntervalSince1970
+            guard let issued = message["studioIssuedAt"] as? Double, issued.isFinite,
+                  issued >= lastStudioRequestTime, issued <= now+0.1, now-issued <= 5 else {
+                reply?(["studioAccepted":false,"studioRecording":false]); return
+            }
+            lastStudioRequestTime = issued
+            let recording = message["studioRecording"] as? Bool == true
+            let accepted = studioRequestReceived?(recording,min(until,Date().timeIntervalSince1970+5)) == true
+            reply?(["studioAccepted":accepted,"studioRecording":accepted && recording]); return
+        }
         if let until = message["streamUntil"] as? Double, until.isFinite {
             streamUntil = min(until, Date().timeIntervalSince1970+30)
         }
         reply?(["ok":true])
         #else
+        if let data = message["controlConnection"] as? Data, data.count <= 8192,
+           let request = try? JSONDecoder().decode(ControlConnectionRequest.self,from:data), request.isValid,
+           let handler = controlRequestReceived {
+            handler(request) { response in
+                if let data = try? JSONEncoder().encode(response) { reply?(["controlConnectionReply":data]) }
+            }
+            return
+        }
+        if let data = message["sensorBatch"] as? Data, data.count <= 200_000,
+           let batch = try? JSONDecoder().decode(SensorBatch.self,from:data), batch.isValid {
+            sensorBatchReceived?(batch); reply?(["ok":true]); return
+        }
         if let data = message["interactionDiagnostics"] as? Data, data.count <= 32_768,
            let snapshot = try? JSONDecoder().decode(InteractionDiagnosticsSnapshot.self,from:data), snapshot.isValid {
             diagnosticsReceived?(snapshot); reply?(["ok":true]); return

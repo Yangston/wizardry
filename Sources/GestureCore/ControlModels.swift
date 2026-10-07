@@ -69,6 +69,14 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
         }
     }
     var isHomePower: Bool { [.lightOn, .lightOff, .lightToggle].contains(self) }
+    func isAllowed(inProfile profile: String) -> Bool {
+        if profile == "computer" { return computerCommand != nil || self == .haptic }
+        if profile == "phone" {
+            return [.haptic,.phonePlayPause,.phoneNext,.phonePrevious,.phonePing,.shortcut,
+                    .spotifyPlayPause,.spotifyNext,.spotifyPrevious,.spotifyVolumeUp,.spotifyVolumeDown].contains(self)
+        }
+        return true
+    }
 }
 
 struct GestureBinding: Codable, Identifiable, Equatable {
@@ -93,6 +101,8 @@ struct WizardryConfiguration: Codable, Equatable {
     var schema = 1
     var revision = UUID().uuidString
     var selectedProfileID = "computer"
+    // Optional preserves configurations saved before manual connection controls.
+    var controlConnectionEnabled: Bool? = nil
     var threshold = 0.65
     var armSeconds = 8.0
     var profiles: [ControlProfile] = [
@@ -112,6 +122,7 @@ struct WizardryConfiguration: Codable, Equatable {
     ]
     var selectedProfile: ControlProfile { profiles.first { $0.id == selectedProfileID } ?? profiles[0] }
     var supportsLiveVolume: Bool { ["computer", "phone"].contains(selectedProfileID) }
+    var allowsControl: Bool { controlConnectionEnabled != false }
     var isValid: Bool {
         schema == 1 && !profiles.isEmpty && profiles.count <= 10 &&
         profiles.contains { $0.id == selectedProfileID } &&
@@ -155,9 +166,18 @@ struct VolumeMotionFeedback: Codable, Equatable {
     }
 }
 
+struct TwistVolumeFeedback: Codable, Equatable {
+    var startingVolume: Double
+    var twistRadians: Double
+    var angularVelocity: Double
+    var isValid: Bool {
+        [startingVolume,twistRadians,angularVelocity].allSatisfy(\.isFinite) && (0...1).contains(startingVolume)
+    }
+}
+
 struct WatchControlSnapshot: Codable, Equatable {
     enum Phase: String, Codable {
-        case unarmed, calibrating, armed, extending, volumeStarting, adjustingVolume, lockingVolume, locked, stopped, failed, enrolling
+        case unarmed, calibrating, armed, extending, volumeStarting, adjustingVolume, lockingVolume, locked, stopped, failed, enrolling, recordingMovement
         var title: String {
             switch self {
             case .unarmed: return "Activate on Watch"
@@ -171,6 +191,7 @@ struct WatchControlSnapshot: Codable, Equatable {
             case .stopped: return "Stopped · activate again"
             case .failed: return "Volume unconfirmed"
             case .enrolling: return "Learning finger tap"
+            case .recordingMovement: return "Recording movement · actions off"
             }
         }
     }
@@ -185,11 +206,12 @@ struct WatchControlSnapshot: Codable, Equatable {
     var armRemaining: Int
     var enrollmentRemaining: Int?
     var volumeMotion: VolumeMotionFeedback? = nil
+    var twistVolume: TwistVolumeFeedback? = nil
     var isValid: Bool {
         [requestedVolume,acknowledgedVolume].allSatisfy {$0.map {$0.isFinite && (0...1).contains($0)} ?? true} &&
         (relativeYaw.map {$0.isFinite && abs($0) <= .pi+0.001} ?? true) &&
         (0...20).contains(armRemaining) && (enrollmentRemaining.map {(0...300).contains($0)} ?? true) &&
-        singleTapStatus.count <= 500 && profileID.count <= 128 && (volumeMotion?.isValid ?? true)
+        singleTapStatus.count <= 500 && profileID.count <= 128 && (volumeMotion?.isValid ?? true) && (twistVolume?.isValid ?? true)
     }
 }
 
@@ -214,10 +236,11 @@ struct CommandGate {
     private var lastAction = -Double.infinity
     mutating func accept(_ event: GestureRequest, configuration: WizardryConfiguration, now: Double) -> GestureBinding? {
         seen = seen.filter { now - $0.value < 30 }
-        guard now.isFinite, event.createdAt.isFinite, abs(now - event.createdAt) <= 5,
+        guard configuration.allowsControl, now.isFinite, event.createdAt.isFinite, abs(now - event.createdAt) <= 5,
               event.revision == configuration.revision, event.profileID == configuration.selectedProfileID,
               seen[event.id] == nil, now - lastAction >= 0.3,
-              let binding = configuration.selectedProfile.bindings.first(where: { $0.gesture == event.gesture && $0.enabled }) else { return nil }
+              let binding = configuration.selectedProfile.bindings.first(where: { $0.gesture == event.gesture && $0.enabled }),
+              binding.action.isAllowed(inProfile:event.profileID) else { return nil }
         seen[event.id] = now
         lastAction = now
         return binding

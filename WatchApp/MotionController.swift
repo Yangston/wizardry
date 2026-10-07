@@ -19,7 +19,20 @@ final class MotionController: ObservableObject {
     @Published private(set) var rollDegrees = 0.0
     @Published private(set) var pitchDegrees = 0.0
     @Published private(set) var yawDegrees = 0.0
-    @Published private(set) var volumeMotion: VolumeMotionFeedback?
+    @Published private(set) var volumeTwist: TwistVolumeFeedback?
+    @Published private(set) var connectionMessage = "Confirm the control target"
+    @Published private(set) var connectionReady = false
+    @Published private(set) var connectionBusy = false
+    @Published private(set) var studioRecording = false
+    @Published private(set) var studioStreaming = false
+    private var connectionRequestID: UUID?
+    private var connectionTimeout: Task<Void,Never>?
+    private var studioUntil = 0.0
+    private var studioSessionID = UUID()
+    private var studioBatchSequence = 0
+    private var studioSamples: [SensorFrame] = []
+    private var studioDropped = 0
+    private var studioRecordingBlocked = false
     @Published private(set) var sampleRate = 0.0
     @Published private(set) var interactionDiagnostics: InteractionDiagnosticsSnapshot?
     @Published private(set) var count = 0
@@ -42,10 +55,9 @@ final class MotionController: ObservableObject {
     private var arbiter = ExtensionArbiter()
     private var viewingAngles: (Double,Double)?
     private var extending = false
-    private var tracker = VerticalVolumeTracker()
+    private var tracker = TwistVolumeTracker()
     private var volumeClaimed = false
     private var tapFrozen = false
-    private var pendingMotion: [CapturedMotion] = []
     private var diagnostics = InteractionDiagnostics()
     private var reducedLuminance = false
     private var lastDiagnostics = -Double.infinity
@@ -80,26 +92,19 @@ final class MotionController: ObservableObject {
         if let data = UserDefaults.standard.data(forKey:"watchConfiguration"),
            let saved = try? JSONDecoder().decode(WizardryConfiguration.self,from:data), saved.isValid { configuration = saved }
         link.configurationReceived = { [weak self] config in
-            guard let self else { return }
-            let changed = self.configuration != config
-            self.configuration = config
-            if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
-            if changed {
-                if self.activation.isPending { self.stop("Settings changed · activate again",reason:.settingsChanged) }
-                else if self.gestures.phase != .active { self.pause("Settings changed · raise wrist to resume",reason:.settingsChanged) }
-                else { self.configureEngine(reason:.settingsChanged) }
-                self.actionID = nil
-            }
-            self.actionStatus = "Synced: \(config.selectedProfile.name)"; self.actionFailed = false
+            self?.applyConfiguration(config)
         }
+        link.activated = { [weak self] in self?.refreshConnection() }
+        link.studioRequestReceived = { [weak self] recording,until in self?.receiveStudio(recording:recording,until:until) == true }
         if let data = UserDefaults.standard.data(forKey:"fingerTapModel"),
            let model = try? JSONDecoder().decode(FingerTapModel.self,from:data), model.isValid, model.validated {
             tapModel = model; tapEnrollmentStatus = "Personalized single tap enabled"
         }
         volume.didBegin = { [weak self] in
             guard let self, self.volumeClaimed, let motion = self.lastMotion, let level = self.volume.acknowledged else { return }
-            self.tracker.begin(volume:level,acceleration:motion.acceleration,gravity:motion.gravity,time:motion.time)
-            self.volumeMotion = self.tracker.feedback
+            guard ProcessInfo.processInfo.systemUptime-motion.time <= 0.25 else { self.endVolume(lock:false,reason:.staleMotion); return }
+            self.tracker.begin(volume:level,roll:motion.roll,time:motion.time)
+            self.volumeTwist = self.twistFeedback
             self.haptic(.click)
         }
         volume.didFinish = { [weak self] in
@@ -115,13 +120,124 @@ final class MotionController: ObservableObject {
         interactionRuntime.stop(reason:reason)
         armExpiryTask?.cancel(); armExpiryTask = nil
         if volume.ownsMotion { volume.finish(lock:false) }
-        volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false; pendingMotion = []
+        volumeClaimed = false; arbiter = ExtensionArbiter(); tapFrozen = false
         pendingVolumeStopReason = nil
-        viewingAngles = nil; extending = false; yawDegrees = 0; rollDegrees = 0; pitchDegrees = 0; volumeMotion = nil
+        viewingAngles = nil; extending = false; yawDegrees = 0; rollDegrees = 0; pitchDegrees = 0; volumeTwist = nil
         gestures.reset()
         gestures.engine.threshold = configuration.threshold
         gestures.engine.armSeconds = configuration.armSeconds
         armed = false; armRemaining = 0
+    }
+    private var twistFeedback: TwistVolumeFeedback {
+        .init(startingVolume:tracker.startingVolume,twistRadians:tracker.twistRadians,angularVelocity:tracker.angularVelocity)
+    }
+    private func applyConfiguration(_ config: WizardryConfiguration) {
+        guard config.isValid else { return }
+        let changed = configuration != config
+        configuration = config
+        if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
+        if changed {
+            connectionReady = false
+            if !studioRecording {
+                if activation.isPending { stop("Target or settings changed · activate again",reason:.settingsChanged) }
+                else { configureEngine(reason:.settingsChanged) }
+            }
+            actionID = nil
+        }
+        actionStatus = "Target: \(config.selectedProfile.name)"; actionFailed = false
+        if !config.allowsControl { connectionMessage = "Control disconnected"; connectionReady = false }
+    }
+    func refreshConnection() { requestConnection(.status) }
+    func connectTarget(_ profileID: String) { requestConnection(.connect,profileID:profileID) }
+    func disconnectTarget() {
+        if !studioRecording { pause("Control disconnected",reason:.explicitStop) }
+        connectionReady = false
+        requestConnection(.disconnect)
+    }
+    private func requestConnection(_ operation: ControlConnectionRequest.Operation, profileID: String? = nil, activate: Bool = false) {
+        let request = ControlConnectionRequest(operation:operation,profileID:profileID)
+        connectionRequestID = request.id; connectionBusy = true
+        connectionMessage = operation == .disconnect ? "Disconnecting control…" : "Confirming target…"
+        connectionTimeout?.cancel()
+        connectionTimeout = Task { [weak self] in
+            do { try await Task.sleep(for:.seconds(3)) } catch { return }
+            guard let self, self.connectionRequestID == request.id else { return }
+            self.connectionRequestID = nil; self.connectionBusy = false; self.connectionReady = false
+            self.connectionMessage = "iPhone did not confirm the target. Open Wizardry and reconnect."
+        }
+        link.requestControl(request) { [weak self] result in
+            guard let self, self.connectionRequestID == request.id else { return }
+            self.connectionTimeout?.cancel(); self.connectionRequestID = nil; self.connectionBusy = false
+            switch result {
+            case .success(let reply):
+                self.applyConfiguration(reply.configuration)
+                self.connectionReady = reply.configuration.allowsControl && reply.targetReady
+                self.connectionMessage = reply.message
+                if activate {
+                    if self.connectionReady { self.activateConfirmedTarget() }
+                    else { self.status = reply.message }
+                }
+            case .failure(let error):
+                self.connectionReady = false; self.connectionMessage = error.localizedDescription
+                if activate { self.status = self.connectionMessage }
+            }
+        }
+    }
+    private func receiveStudio(recording: Bool, until: Double) -> Bool {
+        let now = Date().timeIntervalSince1970
+        let wantsStream = until > now
+        if !recording { studioRecordingBlocked = false }
+        guard !enrollmentRecording else { return false }
+        if recording && wantsStream {
+            guard !studioRecordingBlocked else { return false }
+            guard gestures.phase == .active || (studioRecording && running && gestures.phase == .inactive) else { return false }
+            if !studioRecording {
+                pause("Computer recording · actions off",reason:.enrollment)
+                studioRecording = true; studioSessionID = UUID(); studioBatchSequence = 0; studioDropped = 0
+                if !sessionActive { startSession() } else { resume() }
+                guard running, interactionRuntime.start(until:ProcessInfo.processInfo.systemUptime+65,canStart:gestures.phase == .active) else {
+                    studioRecording = false; return false
+                }
+                capture?.reset(model:nil)
+            }
+            studioUntil = until; status = "Computer recording · actions off"
+            studioStreaming = true
+            return true
+        }
+        if studioRecording {
+            flushStudioSamples()
+            studioRecording = false
+            pause("Recording ended · activate to control",reason:.enrollment)
+        }
+        studioUntil = wantsStream ? until : 0
+        if wantsStream, gestures.phase == .active {
+            if !sessionActive { startSession() } else { resume() }
+        }
+        studioStreaming = wantsStream && running
+        return !wantsStream || running
+    }
+    private func captureStudioSample(_ motion: CapturedMotion) {
+        guard Date().timeIntervalSince1970 < studioUntil else { studioSamples = []; return }
+        let a = motion.acceleration, r = motion.rotation, g = motion.gravity, q = motion.attitude
+        let now = ProcessInfo.processInfo.systemUptime
+        let frame = SensorFrame(time:motion.time,wallTime:Date().timeIntervalSince1970-(now-motion.time),
+            ax:a.x,ay:a.y,az:a.z,rx:r.x,ry:r.y,rz:r.z,gx:g.x,gy:g.y,gz:g.z,
+            roll:motion.roll,pitch:motion.pitch,yaw:motion.yaw,qx:q.x,qy:q.y,qz:q.z,qw:q.w,
+            rawAx:motion.rawAcceleration?.x,rawAy:motion.rawAcceleration?.y,rawAz:motion.rawAcceleration?.z,rawTime:motion.rawTime,
+            mx:motion.magnetic?.x,my:motion.magnetic?.y,mz:motion.magnetic?.z,magneticAccuracy:motion.magneticAccuracy)
+        guard frame.isValid else { studioDropped += 1; return }
+        studioSamples.append(frame)
+        if studioSamples.count >= 20 { flushStudioSamples() }
+    }
+    private func flushStudioSamples() {
+        guard !studioSamples.isEmpty else { return }
+        let batch = SensorBatch(sessionID:studioSessionID,batchSequence:studioBatchSequence,samples:studioSamples,
+            droppedSamples:studioDropped,recording:studioRecording,
+            metadata:.init(watchModel:WKInterfaceDevice.current().model,watchOS:WKInterfaceDevice.current().systemVersion))
+        studioBatchSequence += 1
+        if link.sendSensorBatch(batch) { studioDropped = 0 }
+        else { studioDropped += studioSamples.count }
+        studioSamples = []
     }
     func start() {
         cancelShortcutActivation()
@@ -137,6 +253,10 @@ final class MotionController: ObservableObject {
                 if Date() >= end { self.stop("Session ended after 30 minutes",reason:.runtimeExpired); return }
                 if self.interactionRuntime.expireIfNeeded() { continue }
                 let now = ProcessInfo.processInfo.systemUptime
+                if self.studioRecording && Date().timeIntervalSince1970 >= self.studioUntil {
+                    _ = self.receiveStudio(recording:false,until:0)
+                }
+                if Date().timeIntervalSince1970 >= self.studioUntil { self.studioStreaming = false }
                 if self.volume.ownsMotion && now-self.lastDelivery > 0.25 { self.endVolume(lock:false,reason:.staleMotion) }
                 if self.enrollmentRecording {
                     self.enrollmentRemaining = max(0,Int(ceil(self.enrollmentDeadline-now)))
@@ -179,7 +299,7 @@ final class MotionController: ObservableObject {
                       ProcessInfo.processInfo.systemUptime >= self.ignoreTapsUntil else { return }
                 self.tapFrozen = output.frozen
                 if output.observation?.recognized == true, let motion = self.lastMotion {
-                    self.pendingMotion = []; self.tracker.freeze(at:motion.time)
+                    self.tracker.freeze(roll:motion.roll,time:motion.time)
                 }
                 if output.event != nil, self.volumeClaimed, self.volume.state == .adjusting { self.endVolume(lock:true) }
             }
@@ -222,6 +342,9 @@ final class MotionController: ObservableObject {
         suspendCapture(message,reason:reason)
     }
     private func suspendCapture(_ message: String, reason: InteractionEndReason = .activationInterrupted) {
+        flushStudioSamples()
+        if studioRecording { studioRecordingBlocked = true }
+        studioRecording = false; studioStreaming = false; studioUntil = 0
         cancelEnrollment("Recording interrupted - repeat this step")
         capture?.cancelEnrollment()
         generation += 1; manager.stopDeviceMotionUpdates(); manager.stopAccelerometerUpdates(); running = false; buffer = []; configureEngine(reason:reason)
@@ -230,7 +353,7 @@ final class MotionController: ObservableObject {
     func setScenePhase(_ phase: ForegroundGestureSession.Phase) {
         let now = ProcessInfo.processInfo.systemUptime
         let canContinue = gestures.transition(to:phase,at:now) ||
-            (phase == .inactive && (volume.ownsMotion || (activation.isPending && interactionRuntime.isRequested)))
+            (phase == .inactive && (volume.ownsMotion || (studioRecording && interactionRuntime.isRequested) || (activation.isPending && interactionRuntime.isRequested)))
         recordDiagnostic("scene:\(String(describing:phase))")
         if phase == .active {
             resume()
@@ -263,6 +386,11 @@ final class MotionController: ObservableObject {
         }
     }
     func activateFromShortcut() {
+        guard !studioRecording else { status = "Computer recording · actions off"; return }
+        if !enrollmentRecording { pause("Confirming control target…",reason:.replaced) }
+        requestConnection(.status,activate:true)
+    }
+    private func activateConfirmedTarget() {
         // Enrollment deliberately includes double touches as negative trials.
         // AssistiveTouch invokes this same shortcut for them. While a recording
         // is already frontmost, clear pending control input without throwing away
@@ -272,7 +400,7 @@ final class MotionController: ObservableObject {
             cancelShortcutActivation(); gestures.reset(); armed = false; armRemaining = 0
             // Capture is training-only (no model). Preserve complete candidate
             // windows so both halves of a negative double touch are recorded.
-            tapFrozen = false; pendingMotion = []
+            tapFrozen = false
             return
         }
         // Invalidate queued sensor callbacks as well as any earlier launch request.
@@ -312,7 +440,7 @@ final class MotionController: ObservableObject {
         armExpiryTask?.cancel(); status = volume.message
     }
     func startEnrollmentStep() {
-        guard gestures.phase == .active, !enrollmentRecording else { return }
+        guard gestures.phase == .active, !enrollmentRecording, !studioRecording else { return }
         if enrollment.stage == .complete { enrollment = TapEnrollment() }
         if !sessionActive { start() }
         guard running else { return }
@@ -363,9 +491,10 @@ final class MotionController: ObservableObject {
     }
     private func updateArmDisplay(at now: Double) {
         armed = gestures.engine.isArmed(at:now)
-        if !armed && !volume.ownsMotion && !activation.isPending { interactionRuntime.stop(reason:.armedExpired) }
+        if !armed && !volume.ownsMotion && !activation.isPending && !studioRecording { interactionRuntime.stop(reason:.armedExpired) }
         armRemaining = armed ? max(0,Int(ceil(gestures.engine.armedUntil-now))) : 0
         if volumeClaimed { status = volume.message }
+        else if studioRecording { status = "Computer recording · actions off" }
         else if activation.isPending { status = "Hold still · preparing gestures" }
         else if armed { status = "Ready · yaw \(Int(yawDegrees.rounded()))° · \(armRemaining)s" }
         else { status = "Activate Wizardry or tap Arm" }
@@ -429,10 +558,13 @@ final class MotionController: ObservableObject {
             cancelEnrollment("Recording interrupted - repeat this step")
         }
         lastAccepted = time; lastDelivery = now; lastMotion = motion
+        captureStudioSample(motion)
         let acceleration = motion.acceleration.length, rotation = motion.rotation.length
         var gestureEvent: GestureEngine.Event?
         if navigationPath.last == .enrollment {
             // Enrollment never executes computer or other mapped commands.
+        } else if studioRecording {
+            // Dataset capture is deliberately unable to dispatch any action.
         } else if activation.isPending {
             switch activation.update(roll:motion.roll,pitch:motion.pitch,acceleration:acceleration,
                                      rotationRate:rotation,sampleTime:time,now:now) {
@@ -451,17 +583,10 @@ final class MotionController: ObservableObject {
             }
         } else if volumeClaimed {
             if volume.state == .adjusting {
-                if now < ignoreTapsUntil {
-                    tracker.freeze(at:time); pendingMotion = []
-                } else if tapFrozen {
-                    pendingMotion.append(motion)
-                    if pendingMotion.count > 80 { pendingMotion = []; endVolume(lock:false) }
+                if tapFrozen {
+                    tracker.freeze(roll:motion.roll,time:time)
                 } else {
-                    for frame in pendingMotion + [motion] {
-                        _ = tracker.update(acceleration:frame.acceleration,gravity:frame.gravity,
-                                           rotation:frame.rotation.length,time:frame.time)
-                    }
-                    pendingMotion = []; volume.setTarget(tracker.target)
+                    volume.setTarget(tracker.update(roll:motion.roll,time:time))
                 }
                 // A stationary hand holds volume; it does not end the awake
                 // interaction. Fresh sensing, explicit lock and deadlines still
@@ -503,7 +628,7 @@ final class MotionController: ObservableObject {
             updateArmDisplay(at:now)
             rollDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.roll,from:$0.0)*180 / .pi} ?? 0
             pitchDegrees = viewingAngles.map {ExtensionArbiter.offset(motion.pitch,from:$0.1)*180 / .pi} ?? 0
-            if volumeMotion != nil { volumeMotion = tracker.feedback }
+            if volumeTwist != nil { volumeTwist = twistFeedback }
             sampleRate = diagnostics.motionHz
             if now-lastDiagnostics >= 1 { publishDiagnostics() }
             lastDisplay = time
@@ -522,7 +647,8 @@ final class MotionController: ObservableObject {
     }
     private func controlSnapshot(yaw: Double) -> WatchControlSnapshot {
         let phase: WatchControlSnapshot.Phase
-        if navigationPath.last == .enrollment { phase = .enrolling }
+        if studioRecording { phase = .recordingMovement }
+        else if navigationPath.last == .enrollment { phase = .enrolling }
         else if activation.isPending { phase = .calibrating }
         else if volumeClaimed {
             switch volume.state {
@@ -540,7 +666,7 @@ final class MotionController: ObservableObject {
                      acknowledgedVolume:volumeClaimed ? volume.acknowledged : nil,dryRun:volumeClaimed && volume.dryRun,
                      singleTapEnabled:tapModel?.validated == true,singleTapStatus:tapEnrollmentStatus,
                      armRemaining:armRemaining,enrollmentRemaining:enrollmentRecording ? enrollmentRemaining : nil,
-                     volumeMotion:volumeClaimed ? volumeMotion : nil)
+                     twistVolume:volumeClaimed ? volumeTwist : nil)
     }
     private func send(_ gesture: GestureKind) {
         guard actionID == nil else { actionStatus = "Previous action is still running"; return }
