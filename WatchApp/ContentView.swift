@@ -6,6 +6,7 @@ struct ContentView: View {
     @ObservedObject var link: WatchLink
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @State private var showsDiagnostics = false
     var body: some View {
         NavigationStack(path:$motion.navigationPath) {
             ScrollView {
@@ -42,14 +43,18 @@ struct ContentView: View {
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
                     Text("Setup, pairing & live graphs are on iPhone.").font(.caption2).multilineTextAlignment(.center)
                     if let diagnostic = motion.interactionDiagnostics {
-                        DisclosureGroup("Awake diagnostics") {
+                        Button(showsDiagnostics ? "Hide awake diagnostics" : "Awake diagnostics") { showsDiagnostics.toggle() }
+                            .font(.caption2)
+                        if showsDiagnostics {
+                            VStack(spacing:4) {
                             Text("Scene: \(diagnostic.scene) · display: \(diagnostic.reducedLuminance ? "reduced" : "full")")
                             Text("Autorotation requested: \(diagnostic.requested ? "yes" : "no") · enabled: \(diagnostic.enabled ? "yes" : "no")")
                             Text(String(format:"Motion %.0f Hz · raw %.0f Hz · delay %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.processingDelayMS))
                             Text(String(format:"Confirmed %.1f Hz · reply %.0f ms",diagnostic.confirmedUpdateHz,diagnostic.roundTripMS))
                             Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
                             Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time)")
-                        }.font(.caption2)
+                            }.font(.caption2)
+                        }
                     }
                 }.padding(.horizontal,3)
             }.navigationTitle("Wizardry")
