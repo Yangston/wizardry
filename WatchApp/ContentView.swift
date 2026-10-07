@@ -47,12 +47,13 @@ struct ContentView: View {
                             .font(.caption2)
                         if showsDiagnostics {
                             VStack(spacing:4) {
-                            Text("Scene: \(diagnostic.scene) · display: \(diagnostic.reducedLuminance ? "reduced" : "full")")
-                            Text("Autorotation requested: \(diagnostic.requested ? "yes" : "no") · enabled: \(diagnostic.enabled ? "yes" : "no")")
-                            Text(String(format:"Motion %.0f Hz · raw %.0f Hz · delay %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.processingDelayMS))
-                            Text(String(format:"Confirmed %.1f Hz · reply %.0f ms",diagnostic.confirmedUpdateHz,diagnostic.roundTripMS))
-                            Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
-                            Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time)")
+                                Text("Scene: \(diagnostic.scene) / \(diagnostic.application) · display: \(diagnostic.reducedLuminance ? "reduced" : "full")")
+                                Text("Autorotation requested: \(diagnostic.requested ? "yes" : "no") · enabled: \(diagnostic.enabled ? "yes" : "no")")
+                                Text("Rotated: \(diagnostic.rotated ? "yes" : "no")")
+                                Text(String(format:"Motion %.0f Hz · raw %.0f Hz · delay %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.processingDelayMS))
+                                Text(String(format:"Max gap %.0f ms · confirmed %.1f Hz · reply %.0f ms",diagnostic.maximumGapMS,diagnostic.confirmedUpdateHz,diagnostic.roundTripMS))
+                                Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
+                                Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time)")
                             }.font(.caption2)
                         }
                     }

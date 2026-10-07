@@ -120,19 +120,7 @@ struct WatchControlCard: View {
                     Text("Volume: "+reply.message).font(.caption).foregroundStyle(.orange)
                 }
                 if let diagnostic = store.watchDiagnostics {
-                    DisclosureGroup("Watch awake diagnostics") {
-                        VStack(alignment:.leading,spacing:6) {
-                            Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time) · \(diagnostic.scene) / \(diagnostic.application)")
-                            Text("Display \(diagnostic.reducedLuminance ? "reduced" : "full") · autorotation requested \(diagnostic.requested ? "yes" : "no"), enabled \(diagnostic.enabled ? "yes" : "no")")
-                            Text(String(format:"Motion %.0f Hz · raw %.0f Hz · sample age %.0f ms · processing %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.sampleAgeMS,diagnostic.processingDelayMS))
-                            Text(String(format:"Confirmed %.1f Hz · reply %.0f ms · %d updates in flight",diagnostic.confirmedUpdateHz,diagnostic.roundTripMS,diagnostic.outstandingUpdates))
-                            Text("Last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
-                            Text("Confirmation rate is not measured audio-application rate. Display state still needs physical observation.").foregroundStyle(.secondary)
-                            ForEach(Array(diagnostic.events.suffix(8).enumerated()),id:\.offset) { _,event in
-                                Text(String(format:"%.2f",event.uptime)+" · "+event.event+" · enabled "+(event.enabled ? "yes" : "no"))
-                            }
-                        }.font(.caption2).textSelection(.enabled)
-                    }
+                    WatchAwakeDiagnosticsView(diagnostic:diagnostic)
                 }
             }.padding(18).background(.white.opacity(0.05),in:RoundedRectangle(cornerRadius:20))
         }
@@ -155,6 +143,37 @@ struct WatchControlCard: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text("\(Int((value*100).rounded()))%").font(.title2.monospacedDigit())
         }
+    }
+}
+
+private struct WatchAwakeDiagnosticsView: View {
+    let diagnostic: InteractionDiagnosticsSnapshot
+    var body: some View {
+        DisclosureGroup("Watch awake diagnostics") {
+            VStack(alignment:.leading,spacing:6) {
+                Text("Recorded \(Date(timeIntervalSince1970:diagnostic.recordedAt),style:.time) · \(diagnostic.scene) / \(diagnostic.application)")
+                Text(displayDescription)
+                Text(String(format:"Motion %.0f Hz · raw %.0f Hz · sample age %.0f ms · processing %.0f ms",diagnostic.motionHz,diagnostic.rawHz,diagnostic.sampleAgeMS,diagnostic.processingDelayMS))
+                Text(String(format:"Maximum sample gap %.0f ms · confirmed %.1f Hz · reply %.0f ms",diagnostic.maximumGapMS,diagnostic.confirmedUpdateHz,diagnostic.roundTripMS))
+                Text("\(diagnostic.outstandingUpdates) updates in flight · last stop: \(diagnostic.lastStop?.rawValue ?? "none")")
+                Text("Confirmation rate is not measured audio-application rate. Display state still needs physical observation.").foregroundStyle(.secondary)
+                ForEach(Array(diagnostic.events.suffix(8).enumerated()),id:\.offset) { item in
+                    Text(eventDescription(item.element))
+                }
+            }.font(.caption2).textSelection(.enabled)
+        }
+    }
+    private var displayDescription: String {
+        let luminance = diagnostic.reducedLuminance ? "reduced" : "full"
+        let requested = diagnostic.requested ? "yes" : "no"
+        let enabled = diagnostic.enabled ? "yes" : "no"
+        let rotated = diagnostic.rotated ? "yes" : "no"
+        return "Display \(luminance) · autorotation requested \(requested), enabled \(enabled), rotated \(rotated)"
+    }
+    private func eventDescription(_ event: InteractionDiagnosticEvent) -> String {
+        let time = String(format:"%.2f",event.uptime)
+        let enabled = event.enabled ? "yes" : "no"
+        return "\(time) · \(event.event) · enabled \(enabled)"
     }
 }
 
