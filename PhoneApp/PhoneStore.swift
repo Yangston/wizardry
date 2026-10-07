@@ -260,9 +260,18 @@ final class PhoneStore: ObservableObject {
             guard self.configuration.revision == revision, self.configuration.allowsControl, !self.studio.recording else {
                 reply(.init(id:request.id,configuration:self.configuration,targetReady:false,message:"Target changed; connect again")); return
             }
-            let message = issue ?? "Ready · \(self.configuration.selectedProfile.name) is the only control target"
+            let targetReady = profile == "phone" || issue == nil
+            let message: String
+            if profile == "phone" {
+                message = issue.map { "This iPhone connected · Live volume: "+$0 } ?? "This iPhone connected · Live volume ready"
+            } else if profile == "computer", issue == nil {
+                let endpoint = URL(string:UserDefaults.standard.string(forKey:"serverURL") ?? "")
+                let destination = (endpoint?.host ?? "paired receiver") + (endpoint?.port.map { ":\($0)" } ?? "")
+                message = "Computer connected · "+destination
+            } else { message = issue ?? "Ready · \(self.configuration.selectedProfile.name) is the only control target" }
             self.controlConnectionMessage = message
-            reply(.init(id:request.id,configuration:self.configuration,targetReady:issue == nil,message:message))
+            reply(.init(id:request.id,configuration:self.configuration,targetReady:targetReady,message:message,
+                        liveVolumeReady:self.configuration.supportsLiveVolume ? issue == nil : nil))
         }
     }
     func connectHome() { UserDefaults.standard.set(true,forKey:"homeEnabled"); home.connect() }

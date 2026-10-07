@@ -22,11 +22,15 @@ final class MotionController: ObservableObject {
     @Published private(set) var volumeTwist: TwistVolumeFeedback?
     @Published private(set) var connectionMessage = "Confirm the control target"
     @Published private(set) var connectionReady = false
+    @Published private(set) var connectionVolumeReady: Bool?
     @Published private(set) var connectionBusy = false
     @Published private(set) var studioRecording = false
     @Published private(set) var studioStreaming = false
     private var connectionRequestID: UUID?
     private var connectionTimeout: Task<Void,Never>?
+    private var pendingControlActivation: Double?
+    private var activationReachedForeground = false
+    private var configurationGeneration = 0
     private var studioUntil = 0.0
     private var studioSessionID = UUID()
     private var studioBatchSequence = 0
@@ -137,7 +141,9 @@ final class MotionController: ObservableObject {
         configuration = config
         if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
         if changed {
+            configurationGeneration += 1
             connectionReady = false
+            connectionVolumeReady = nil
             connectionMessage = "Target changed to \(config.selectedProfile.name) · confirming…"
             if !studioRecording {
                 if activation.isPending { stop("Target or settings changed · activate again",reason:.settingsChanged) }
@@ -148,16 +154,30 @@ final class MotionController: ObservableObject {
         actionStatus = "Target: \(config.selectedProfile.name)"; actionFailed = false
         if !config.allowsControl { connectionMessage = "Control disconnected"; connectionReady = false }
         else if changed && !confirmed && !connectionBusy { refreshConnection() }
+        if !confirmed && !config.allowsControl && pendingControlActivation != nil {
+            stop("Control disconnected · reconnect before activating",reason:.settingsChanged)
+        }
     }
-    func refreshConnection() { requestConnection(.status) }
-    func connectTarget(_ profileID: String) { requestConnection(.connect,profileID:profileID) }
+    func refreshConnection() {
+        guard !connectionBusy else { return }
+        if pendingControlActivation != nil && !link.reachable {
+            connectionMessage = "Opening paired iPhone link…"; return
+        }
+        requestConnection(.status,activate:pendingControlActivation != nil)
+    }
+    func connectTarget(_ profileID: String) {
+        if !studioRecording { pause("Connecting control target…",reason:.settingsChanged) }
+        requestConnection(.connect,profileID:profileID)
+    }
     func disconnectTarget() {
         if !studioRecording { pause("Control disconnected",reason:.explicitStop) }
         connectionReady = false
         requestConnection(.disconnect)
     }
     private func requestConnection(_ operation: ControlConnectionRequest.Operation, profileID: String? = nil, activate: Bool = false) {
+        if operation != .status { cancelShortcutActivation() }
         let request = ControlConnectionRequest(operation:operation,profileID:profileID)
+        let expectedConfigurationGeneration = configurationGeneration
         connectionRequestID = request.id; connectionBusy = true
         connectionMessage = operation == .disconnect ? "Disconnecting control…" : "Confirming target…"
         connectionTimeout?.cancel()
@@ -166,22 +186,32 @@ final class MotionController: ObservableObject {
             guard let self, self.connectionRequestID == request.id else { return }
             self.connectionRequestID = nil; self.connectionBusy = false; self.connectionReady = false
             self.connectionMessage = "iPhone did not confirm the target. Open Wizardry and reconnect."
+            if activate { self.cancelShortcutActivation(); self.status = self.connectionMessage }
         }
         link.requestControl(request) { [weak self] result in
             guard let self, self.connectionRequestID == request.id else { return }
             self.connectionTimeout?.cancel(); self.connectionRequestID = nil; self.connectionBusy = false
             switch result {
             case .success(let reply):
+                if self.configurationGeneration != expectedConfigurationGeneration && reply.configuration.revision != self.configuration.revision {
+                    // A newer phone selection arrived while this reply was in
+                    // flight. Confirm again within the original launch deadline.
+                    self.refreshConnection(); return
+                }
                 self.applyConfiguration(reply.configuration,confirmed:true)
                 self.connectionReady = reply.configuration.allowsControl && reply.targetReady
+                self.connectionVolumeReady = reply.liveVolumeReady
                 self.connectionMessage = reply.message
                 if activate {
-                    if self.connectionReady { self.activateConfirmedTarget() }
-                    else { self.status = reply.message }
+                    let requestedAt = self.pendingControlActivation
+                    self.pendingControlActivation = nil
+                    if self.connectionReady { self.activateConfirmedTarget(requestedAt:requestedAt) }
+                    else { self.cancelShortcutActivation(); self.status = reply.message }
                 }
             case .failure(let error):
                 self.connectionReady = false; self.connectionMessage = error.localizedDescription
-                if activate { self.status = self.connectionMessage }
+                self.connectionVolumeReady = nil
+                if activate { self.cancelShortcutActivation(); self.status = self.connectionMessage }
             }
         }
     }
@@ -269,7 +299,7 @@ final class MotionController: ObservableObject {
         resume()
     }
     func resume() {
-        guard gestures.phase == .active, navigationPath.last != .nowPlaying, sessionActive, !running else { return }
+        guard pendingControlActivation == nil, gestures.phase == .active, navigationPath.last != .nowPlaying, sessionActive, !running else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if activation.expire(at:now) { stop("Activation timed out · activate again",reason:.activationTimeout); return }
         guard let end = sessionEnd, Date() < end else { stop("Session expired — start again",reason:.runtimeExpired); return }
@@ -357,6 +387,15 @@ final class MotionController: ObservableObject {
         let canContinue = gestures.transition(to:phase,at:now) ||
             (phase == .inactive && (volume.ownsMotion || (studioRecording && interactionRuntime.isRequested) || (activation.isPending && interactionRuntime.isRequested)))
         recordDiagnostic("scene:\(String(describing:phase))")
+        if phase == .active && (pendingControlActivation != nil || activation.isPending) { activationReachedForeground = true }
+        if phase == .background && activationReachedForeground && (pendingControlActivation != nil || activation.isPending) {
+            stop("Left Wizardry · activate again",reason:.background); return
+        }
+        if pendingControlActivation != nil {
+            if phase == .active { refreshConnection() }
+            if pendingControlActivation != nil { status = "Opening control · confirming target" }
+            return
+        }
         if phase == .active {
             resume()
             if running { updateArmDisplay(at:now) }
@@ -389,10 +428,22 @@ final class MotionController: ObservableObject {
     }
     func activateFromShortcut() {
         guard !studioRecording else { status = "Computer recording · actions off"; return }
-        if !enrollmentRecording { pause("Confirming control target…",reason:.replaced) }
-        requestConnection(.status,activate:true)
+        if enrollmentRecording { activateConfirmedTarget(); return }
+        pause("Confirming control target…",reason:.replaced)
+        connectionRequestID = nil; connectionBusy = false; connectionTimeout?.cancel()
+        let requestedAt = ProcessInfo.processInfo.systemUptime
+        activationReachedForeground = gestures.phase == .active
+        pendingControlActivation = requestedAt; activatingFromShortcut = true
+        navigationPath = []; status = "Opening control · confirming target"
+        activationTimeoutTask = Task { [weak self] in
+            do { try await Task.sleep(for:.seconds(ShortcutActivation.timeout)) } catch { return }
+            guard let self, self.pendingControlActivation == requestedAt else { return }
+            self.connectionRequestID = nil; self.connectionBusy = false; self.connectionTimeout?.cancel()
+            self.stop("Could not confirm target · open Wizardry on iPhone and activate again",reason:.activationTimeout)
+        }
+        refreshConnection()
     }
-    private func activateConfirmedTarget() {
+    private func activateConfirmedTarget(requestedAt: Double? = nil) {
         // Enrollment deliberately includes double touches as negative trials.
         // AssistiveTouch invokes this same shortcut for them. While a recording
         // is already frontmost, clear pending control input without throwing away
@@ -405,20 +456,29 @@ final class MotionController: ObservableObject {
             tapFrozen = false
             return
         }
+        let reachedForeground = activationReachedForeground || gestures.phase == .active
         // Invalidate queued sensor callbacks as well as any earlier launch request.
         pause()
-        activation.request(at:ProcessInfo.processInfo.systemUptime)
+        activationReachedForeground = reachedForeground
+        let originalRequest = requestedAt ?? ProcessInfo.processInfo.systemUptime
+        activation.request(at:originalRequest)
         activatingFromShortcut = true
         navigationPath = []
         status = "Opening control · hold still"
         activationTimeoutTask = Task { [weak self] in
-            do { try await Task.sleep(for:.seconds(ShortcutActivation.timeout)) } catch { return }
+            let remaining = originalRequest+ShortcutActivation.timeout-ProcessInfo.processInfo.systemUptime
+            do { try await Task.sleep(for:.seconds(max(0,remaining))) } catch { return }
             guard let self, self.activation.expire(at:ProcessInfo.processInfo.systemUptime) else { return }
             self.stop("Activation timed out · activate again",reason:.activationTimeout)
         }
         startSession()
     }
     private func cancelShortcutActivation() {
+        if pendingControlActivation != nil {
+            connectionRequestID = nil; connectionBusy = false; connectionTimeout?.cancel()
+        }
+        pendingControlActivation = nil
+        activationReachedForeground = false
         activation.cancel()
         activatingFromShortcut = false
         activationTimeoutTask?.cancel()

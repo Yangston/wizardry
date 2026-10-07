@@ -17,5 +17,6 @@ struct ControlConnectionReply: Codable {
     var configuration: WizardryConfiguration
     var targetReady: Bool
     var message: String
+    var liveVolumeReady: Bool? = nil
     var isValid: Bool { configuration.isValid && message.count <= 1000 }
 }

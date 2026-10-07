@@ -130,6 +130,10 @@ private struct WatchConnectionCard: View {
                 .multilineTextAlignment(.center)
             Button(expanded ? "Hide connections" : "Connections") { expanded.toggle() }
             if expanded {
+                if motion.configuration.supportsLiveVolume, let ready = motion.connectionVolumeReady {
+                    Text(ready ? "Live volume ready" : "Live volume unavailable · see status above")
+                        .foregroundStyle(ready ? .green : .orange)
+                }
                 Picker("Choose target",selection:Binding(get:{motion.configuration.selectedProfileID},set:{motion.connectTarget($0)})) {
                     ForEach(motion.configuration.profiles) { Text($0.name).tag($0.id) }
                 }.disabled(motion.connectionBusy || motion.studioRecording)

@@ -30,6 +30,17 @@ final class ConnectionAndSensorTests: XCTestCase {
         XCTAssertTrue(VolumeReadback.confirms(actual:0.5,target:0.5,previous:0.5))
         XCTAssertFalse(VolumeReadback.confirms(actual:.nan,target:0.5,previous:0.5))
     }
+    func testPhoneConnectionCanKeepDiscreteMappingsWhenLiveVolumeIsUnavailable() throws {
+        var configuration = WizardryConfiguration(); configuration.selectedProfileID = "phone"
+        let reply = ControlConnectionReply(id:UUID(),configuration:configuration,targetReady:true,
+                                           message:"Phone connected; show native slider for live volume",liveVolumeReady:false)
+        let decoded = try JSONDecoder().decode(ControlConnectionReply.self,from:JSONEncoder().encode(reply))
+        XCTAssertTrue(decoded.targetReady)
+        XCTAssertEqual(decoded.liveVolumeReady,false)
+        var gate = CommandGate()
+        let event = GestureRequest(createdAt:100,revision:configuration.revision,profileID:"phone",gesture:.pitchUp)
+        XCTAssertEqual(gate.accept(event,configuration:configuration,now:100)?.action,.spotifyNext)
+    }
     func testMappingEditRejectsStaleAndCrossTargetChangesButPreservesUntouchedLegacyBindings() {
         var configuration = WizardryConfiguration()
         configuration.profiles[0].bindings[0].action = .phonePing // Existing legacy value stays stored.

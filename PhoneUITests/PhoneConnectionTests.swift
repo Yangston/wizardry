@@ -52,9 +52,14 @@ final class PhoneConnectionTests: XCTestCase {
     private func setSwitch(_ element: XCUIElement, to enabled: Bool) {
         let desired = enabled ? "1" : "0"
         if element.value as? String != desired {
-            // SwiftUI exposes the full labeled row as a switch. Hit its native
-            // trailing control rather than the label or a clipped row center.
-            element.coordinate(withNormalizedOffset:CGVector(dx:0.95,dy:0.5)).tap()
+            // Drag the native trailing thumb. Its accessible element may also
+            // include the label; a tap on that broad element was missed by the
+            // simulator even when it reported the element as hittable.
+            let edge = element.coordinate(withNormalizedOffset:CGVector(dx:1,dy:0.5))
+            let width = min(element.frame.width,64)
+            let off = edge.withOffset(CGVector(dx:-width*0.72,dy:0))
+            let on = edge.withOffset(CGVector(dx:-width*0.28,dy:0))
+            (enabled ? off : on).press(forDuration:0.1,thenDragTo:enabled ? on : off)
         }
         let changed = XCTNSPredicateExpectation(predicate:NSPredicate(format:"value == %@",desired),object:element)
         XCTAssertEqual(XCTWaiter.wait(for:[changed],timeout:5),.completed)
