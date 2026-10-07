@@ -59,7 +59,8 @@ final class InteractionRuntime {
     }
 
     /// Volume takes over the same activation without toggling the platform aid.
-    /// Its own lock, inactivity and interruption checks end this lease early.
+    /// Explicit lock and interruption checks end this lease early. A stationary
+    /// hand is not an interruption and does not shorten the lease.
     @discardableResult
     func continueThroughVolume(until sessionDeadline: Double) -> Bool {
         continueInteraction(until:sessionDeadline)

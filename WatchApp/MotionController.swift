@@ -463,7 +463,9 @@ final class MotionController: ObservableObject {
                     }
                     pendingMotion = []; volume.setTarget(tracker.target)
                 }
-                if time-tracker.lastMovement >= 5 { endVolume(lock:false,reason:.inactivity) }
+                // A stationary hand holds volume; it does not end the awake
+                // interaction. Fresh sensing, explicit lock and deadlines still
+                // bound this session, and transport heartbeats keep it live.
             }
         } else {
             gestures.expireArm(at:now)

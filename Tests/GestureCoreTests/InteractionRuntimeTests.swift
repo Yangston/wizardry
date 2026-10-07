@@ -32,7 +32,8 @@ final class InteractionRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.deadline,610)
         // Beginning a final write is not a runtime stop; the owner releases it
         // only when final readback arrives (or a deadline/interruption occurs).
-        now = 11.2
+        now = 41.2 // A 30-second stationary hold does not release autorotation.
+        XCTAssertFalse(runtime.expireIfNeeded())
         XCTAssertTrue(runtime.isRequested)
         runtime.stop(reason:.volumeLocked)
         XCTAssertEqual(driver.invalidations,1)

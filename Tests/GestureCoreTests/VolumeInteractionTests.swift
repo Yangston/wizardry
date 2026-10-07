@@ -165,6 +165,18 @@ final class VolumeInteractionTests: XCTestCase {
         for i in 0...100 { XCTAssertNil(engine.update(roll:i.isMultiple(of:2) ? 1 : -1,pitch:0,acceleration:1.5,time:Double(i)*0.02)) }
         XCTAssertFalse(engine.isArmed)
     }
+
+    func testThirtySecondStationaryHoldPreservesTargetAndNextStroke() {
+        var tracker = VerticalVolumeTracker()
+        tracker.begin(volume:0.37,acceleration:zero,gravity:gravity,time:0)
+        for i in 1...3000 {
+            XCTAssertEqual(tracker.update(acceleration:zero,gravity:gravity,rotation:0,time:Double(i)/100),0.37,accuracy:0.000001)
+        }
+        for i in 3001...3020 {
+            _ = tracker.update(acceleration:.init(x:0,y:0,z:-0.1),gravity:gravity,rotation:0,time:Double(i)/100)
+        }
+        XCTAssertGreaterThan(tracker.target,0.37)
+    }
     func testPhoneVolumeUsesTheSameOrderedExpiringSessionAndCannotCrossProfiles() {
         var configuration = WizardryConfiguration(); configuration.selectedProfileID = "phone"
         XCTAssertTrue(configuration.supportsLiveVolume)

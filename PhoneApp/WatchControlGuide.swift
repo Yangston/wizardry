@@ -188,7 +188,7 @@ struct VolumeFlowGuide: View {
                 step("2", "Extend", "Extend your arm so z / yaw changes about 90° from the ready pose. Hold briefly until the volume-entry haptic.")
                 step("3", "Adjust live", profileID == "phone" ? "Keep Wizardry's native volume slider visible on iPhone. Raise/lower in short vertical strokes to change media volume live, starting at its current level. The native-slider bridge is experimental." : "Raise your hand to increase computer volume; lower it to decrease. Use short vertical strokes with pauses. Start at the computer's current volume.")
                 step("4", "Lock", "Touch thumb and index finger together once after enrollment, or press Lock volume on the Watch. Wait for the locked acknowledgement.")
-                Text("Rotate freely while adjusting; returning to the viewing yaw does not stop volume. Lock when done. Five seconds without movement or interrupted sensing also stops it. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
+                Text("Rotate freely and pause while adjusting; returning to the viewing yaw or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust. Height tracking and custom tap recognition are experimental.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 step("2", "Make your wrist action", "Use the selected profile's twist, tilt or shake mapping within the armed window. Return to neutral between actions.")

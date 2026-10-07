@@ -93,7 +93,7 @@ struct ContentView: View {
                 Text("AssistiveTouch replaces Apple's standard Double Tap. Setup is manual; Wizardry cannot change these system settings. While armed, the screen can flip when you turn your wrist away. Leaving Wizardry disarms it.")
                 Text("Live volume · experimental").font(.headline)
                 Text("Look at the Watch while holding still for the ready haptic. Extend your arm until z / yaw changes about 90° from that pose. Hold briefly for the entry haptic, then raise or lower vertically in short strokes with pauses. One learned single finger tap locks volume. Lock volume works before enrollment.")
-                Text("Rotate freely while adjusting; looking back at the Watch does not stop volume. Lock when done. Five seconds without movement or interrupted sensing also stops it. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
+                Text("Rotate freely and pause while adjusting; looking back or holding still does not stop volume. Lock when done. Leaving the app, interrupted sensing, or the ten-minute interaction limit ends it. Activate again to adjust. Height estimation can drift; this is not precise position tracking.")
                 Text("Computer controls the paired receiver. Phone uses an experimental native volume-slider bridge: keep Wizardry open on iPhone with its volume slider visible. Both use current-volume readback; no Shortcut is needed for live Phone adjustment.")
                 Text("Manual control").font(.headline)
                 Text("Tap Arm, hold still looking at the Watch for the ready haptic, then extend or make your action.")

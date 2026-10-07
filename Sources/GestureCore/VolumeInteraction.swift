@@ -79,9 +79,8 @@ struct VerticalVolumeTracker {
     private var bias = 0.0
     private var filtered = 0.0
     private var pendingDistance = 0.0
-    private(set) var lastMovement = 0.0
     mutating func begin(volume: Double, acceleration: MotionVector, gravity: MotionVector, time: Double) {
-        self = Self(); target = min(1,max(0,volume)); startingVolume = target; lastTime = time; lastMovement = time
+        self = Self(); target = min(1,max(0,volume)); startingVolume = target; lastTime = time
         bias = Self.vertical(acceleration,gravity)
     }
     static func vertical(_ acceleration: MotionVector, _ gravity: MotionVector) -> Double {
@@ -105,7 +104,7 @@ struct VerticalVolumeTracker {
                 bias += 0.02*(Self.vertical(acceleration,gravity)-bias)
                 return target
             }
-        } else { stillSince = nil; lastMovement = time }
+        } else { stillSince = nil }
         let raw = Self.vertical(acceleration,gravity)-bias
         controlAcceleration = -raw
         filtered += dt/(0.02+dt)*(raw-filtered)

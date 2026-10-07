@@ -2,6 +2,8 @@
 
 The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 2026. That report does not validate the new 0.2 companion features below. Target hardware reported: Apple Watch Series 12, watchOS 27.0.
 
+The user subsequently reported that rotation works in **0.2.0 (15.1)**, including the previously problematic backward tilt. This is a user-reported rotation result, not completion of the full pose, stationary-hold, output-timing, or battery checklist below.
+
 ## First setup
 
 - [ ] TestFlight installs a launchable iPhone app and the updated Watch app.
@@ -41,7 +43,7 @@ The owner reported the original 0.1.0 (2.1) Watch beta working on September 30, 
 
 ## Physical display and bounded interaction (unverified until checked)
 
-The release requirement is that the physical display remains awake during movement, including backward tilt. Dimming or a black screen with continuing control is a failure of that requirement. The inactive-state checks below test safe behavior if dimming occurs; they do not count as display-awake acceptance.
+The release requirement is that the physical display remains awake during movement, backward tilt, and stationary pauses within a bounded live-volume interaction. Dimming or a black screen with continuing control is a failure of that requirement. The inactive-state checks below test safe behavior if dimming occurs; they do not count as display-awake acceptance.
 
 - [ ] Record watch model, watchOS version, Always On/Low Power settings, and Wrist Flick setting. Compare identical rolls with Wrist Flick on/off if available; distinguish screen dimming from returning to the watch face.
 - [ ] Arm, begin a roll, dim the screen, and complete the roll. Confirm one recognition and one target acknowledgement if fresh samples continue. Repeat with tilt and shake; record dropped gestures and actual sample rates rather than assuming watchOS delivers motion while inactive.
@@ -49,11 +51,12 @@ The release requirement is that the physical display remains awake during moveme
 - [ ] Stay inactive beyond armed expiry, then raise and move. No expired action or queued gesture should execute; fresh shortcut/button activation is required.
 - [ ] Interrupt delivery partway through a roll or shake, then resume before expiry. The remaining armed time is retained, but no partial gesture completes across the interruption; return to neutral before a new action.
 - [ ] Press the Crown, switch apps, open Now Playing, stop, or change settings while armed/inactive. Confirm sensing stops and the old armed state cannot return.
-- [ ] Without explicit arming, movement in either active or inactive scenes cannot act. Manual/Shortcut arming allows only its bounded window while inactive; live volume instead exits after inactivity or interruption.
+- [ ] Without explicit arming, movement in either active or inactive scenes cannot act. Manual/Shortcut arming allows only its bounded window while inactive. Live volume preserves a healthy stationary session until manual lock, explicit interruption, sensing/transport failure, or its existing cap.
 - [ ] In the device console, inspect `InteractionAutorotation` and `InteractionDiagnostics`. Verify enablement when foreground calibration starts, continuous ownership through readiness, and release at armed expiry. Idle screens and enrollment must not enable autorotation. Repeat activation; expiry from the previous activation must not disable the new interaction.
 - [ ] On Series 12/watchOS 27.0, test **both Computer and Phone** outputs with three 15-second changing-volume up/down trials in each condition: sideways, palm-up, backward tilt, and crossing the viewing yaw. The physical display must remain awake throughout, and crossing the viewing yaw must neither freeze nor end volume. Observe the actual display; a true autorotation readback alone is insufficient. Repeat without an attached debugger.
+- [ ] On **both Computer and Phone**, hold still for 10–30 seconds during live volume. Verify the physical display stays awake, volume remains constant, and movement resumes adjustment without reactivation. Confirm an unchanged-volume heartbeat every second and no stationary auto-exit. Repeat without an attached debugger; broader pose/battery checks remain separate.
 - [ ] During those trials, measure actual successful applied/read-back output timestamps, avoiding saturation at 0%/100%. Acceptance targets are at least 30 applied updates/s and p95 inter-update gap no greater than 60 ms while the target changes. Record motion/raw delivery rates, median/worst movement latency, and Watch confirmed acknowledgement Hz separately; acknowledgement arrivals do not measure applied-output timing. These targets are unverified until measured.
-- [ ] Enter live volume near armed expiry. Autorotation remains enabled through adjustment and the bounded final acknowledgement without toggling off/on. Lock and five-second inactivity request the final end; failure, Now Playing, enrollment, backgrounding, explicit stop, and settings changes release the lease. Verify the ten-minute cap from calibration and the outer-session cap without automatic renewal.
+- [ ] Enter live volume near armed expiry. Autorotation remains enabled through adjustment, stationary holds, and the bounded final acknowledgement without toggling off/on. Lock requests the final end; failure, Now Playing, enrollment, backgrounding, explicit stop, and settings changes release the lease. Verify the ten-minute cap from calibration and the outer-session cap without automatic renewal from motion or heartbeats.
 - [ ] After final acknowledgement, stop, or expiry, rotate and lower the wrist. Ordinary display behavior returns, no expired command executes, and a wrist raise does not enable autorotation until fresh activation. Verify interface flips do not alter wrapped-yaw entry or vertical movement direction.
 - [ ] Inspect **Awake diagnostics** on Watch and iPhone: scene/application state, autorotation request/readback, reduced luminance, delivered raw/device-motion Hz, sample age, processing delay, confirmed acknowledgement Hz, round-trip time, outstanding updates, and typed stop reason agree with observed events. Relaunch the Watch app and verify the bounded history of at most 48 events preserves the last stop evidence without credentials.
 - [ ] Compare battery use during repeated armed interactions with the previous build. This build requests no extended runtime, background mode, artificial workout, or silent audio. Record whether autorotation actually prevents sleeping in each physical pose.
@@ -67,6 +70,7 @@ The release requirement is that the physical display remains awake during moveme
 - [ ] Missing motion delivery, lost reachability, and app switching mark phone graphs stale. Brief dimming only remains live when fresh samples actually continue arriving.
 - [ ] Leaving Live stops its stream subscription; graphs never grow without bound.
 - [ ] Turn off the receiver / disconnect Wi-Fi: no delayed action fires when connectivity returns.
+- [ ] Stop request delivery and confirm the six-second phone/receiver missing-request watchdog still closes the backend session. Holding still with healthy one-second heartbeats must not trigger this watchdog; fresh-sample and transport-failure checks remain enforced.
 - [ ] Test Home offline and Spotify unavailable: errors are visible, no fake success.
 - [ ] Check actual reading-session false triggers, watch orientation, battery use, and phone background behavior.
 

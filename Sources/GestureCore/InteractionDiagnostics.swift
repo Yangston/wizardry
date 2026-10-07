@@ -3,7 +3,8 @@ import Foundation
 enum InteractionEndReason: String, Codable {
     case replaced, settingsChanged, explicitStop, navigation, enrollment, background
     case activationInterrupted, activationTimeout, armedExpired, runtimeExpired, systemStopped
-    case volumeLocked, volumeStopped, inactivity, staleMotion, motionGap, invalidMotion, sensorFailure, transportFailure
+    case volumeLocked, volumeStopped, staleMotion, motionGap, invalidMotion, sensorFailure, transportFailure
+    case inactivity // Decode historical traces from builds with a stationary timeout.
 }
 
 struct InteractionDiagnosticEvent: Codable, Equatable {

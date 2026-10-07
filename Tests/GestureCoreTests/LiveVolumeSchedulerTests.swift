@@ -188,6 +188,28 @@ final class LiveVolumeSchedulerTests: XCTestCase {
         }
     }
 
+    func testThirtySecondStationaryHoldKeepsHeartbeatsAndResumesWithoutNewBegin() throws {
+        var scheduler = try started()
+        for second in 1...30 {
+            let now = Double(second)
+            let heartbeat = try request(&scheduler,at:now)
+            XCTAssertEqual(heartbeat.operation,.update)
+            XCTAssertEqual(heartbeat.target,0.5)
+            XCTAssertEqual(scheduler.receive(reply(heartbeat),requestID:heartbeat.id,at:now+0.05),.accepted)
+            XCTAssertEqual(scheduler.phase,.adjusting)
+        }
+        scheduler.setTarget(0.6)
+        let resumed = try request(&scheduler,at:30.06)
+        XCTAssertEqual(resumed.operation,.update)
+        XCTAssertEqual(resumed.sequence,31)
+        XCTAssertEqual(resumed.target,0.6)
+        XCTAssertEqual(scheduler.receive(reply(resumed),requestID:resumed.id,at:30.1),.accepted)
+        scheduler.finish()
+        let end = try request(&scheduler,at:30.1)
+        XCTAssertEqual(end.operation,.end)
+        XCTAssertEqual(scheduler.receive(reply(end),requestID:end.id,at:30.2),.ended)
+    }
+
     func testHundredHzTargetsWithRoundTripDelayAndJitterKeepBoundedThirtyHzDispatch() throws {
         // These are transport dispatch metrics, not physical-device readback.
         for roundTrip in [0.02,0.06,0.10] {

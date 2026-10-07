@@ -153,7 +153,7 @@ struct MotionMappings: View {
                     }
                     Stepper("Start an action within \(Int(store.configuration.armSeconds)) seconds",value:$store.configuration.armSeconds,in:3...20,step:1)
                         .onChange(of:store.configuration.armSeconds) { _,_ in store.saveConfiguration() }
-                    Text("This is the time to enter volume mode or start another action. Once volume starts, it stays active until lock, five seconds without movement, returning to the viewing yaw, or interrupted sensing.").font(.caption).foregroundStyle(.secondary)
+                    Text("This is the time to enter volume mode or start another action. Once volume starts, holding still or rotating back does not end it. Lock when done; leaving the app, interrupted sensing, or the ten-minute interaction limit also ends adjustment.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Ideas to try") {
                     Label("Reading: a twist turns on your lamp; a shake pauses Spotify.",systemImage:"book")
@@ -331,7 +331,7 @@ struct SetupView: View {
                     Text("Select Apple Music actions in Motions if you use Apple's Music app.").font(.caption)
                 }
                 Section("Session behavior") {
-                    Text("Sessions last up to 30 minutes. Activate while looking at the Watch to capture the yaw reference. Enter an action within the armed window. Rotate freely during live volume: looking back at the Watch does not stop it. Lock, five seconds without movement, or interrupted sensing ends adjustment. Leaving Wizardry disarms controls. Awake behavior during wrist tilt needs physical-watch verification.")
+                    Text("Sessions last up to 30 minutes. Activate while looking at the Watch to capture the yaw reference. Enter an action within the armed window. During live volume, looking back or holding still does not stop it. Lock when done. Leaving Wizardry, interrupted sensing, or the ten-minute interaction limit ends adjustment. Display behavior during stationary holds still needs physical-watch verification.")
                     Text("Discrete commands expire after five seconds; live volume messages expire after one second. Neither is retried or queued for later replay. A haptic confirms recognition. Watch and phone status show requested volume, receiver acknowledgement, dry runs, and errors separately.")
                 }.font(.caption)
             }.navigationTitle("Setup")
