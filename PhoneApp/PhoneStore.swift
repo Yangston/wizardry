@@ -68,8 +68,8 @@ final class PhoneStore: ObservableObject {
     init() {
         let saved = UserDefaults.standard.data(forKey:"wizardryConfiguration").flatMap { try? JSONDecoder().decode(WizardryConfiguration.self,from:$0) }
         configuration = saved?.isValid == true ? saved! : WizardryConfiguration()
-        savedConfiguration = configuration
         endpoint = UserDefaults.standard.string(forKey:"serverURL") ?? ""
+        savedConfiguration = configuration
         pairingToken = PairingKeychain.load()
         link.activated = { [weak self] in guard let self else { return }; self.link.sync(self.configuration) }
         link.configurationAcknowledged = { [weak self] revision in
