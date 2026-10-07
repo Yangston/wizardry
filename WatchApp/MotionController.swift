@@ -131,13 +131,14 @@ final class MotionController: ObservableObject {
     private var twistFeedback: TwistVolumeFeedback {
         .init(startingVolume:tracker.startingVolume,twistRadians:tracker.twistRadians,angularVelocity:tracker.angularVelocity)
     }
-    private func applyConfiguration(_ config: WizardryConfiguration) {
+    private func applyConfiguration(_ config: WizardryConfiguration, confirmed: Bool = false) {
         guard config.isValid else { return }
         let changed = configuration != config
         configuration = config
         if let data = try? JSONEncoder().encode(config) { UserDefaults.standard.set(data,forKey:"watchConfiguration") }
         if changed {
             connectionReady = false
+            connectionMessage = "Target changed to \(config.selectedProfile.name) · confirming…"
             if !studioRecording {
                 if activation.isPending { stop("Target or settings changed · activate again",reason:.settingsChanged) }
                 else { configureEngine(reason:.settingsChanged) }
@@ -146,6 +147,7 @@ final class MotionController: ObservableObject {
         }
         actionStatus = "Target: \(config.selectedProfile.name)"; actionFailed = false
         if !config.allowsControl { connectionMessage = "Control disconnected"; connectionReady = false }
+        else if changed && !confirmed && !connectionBusy { refreshConnection() }
     }
     func refreshConnection() { requestConnection(.status) }
     func connectTarget(_ profileID: String) { requestConnection(.connect,profileID:profileID) }
@@ -170,7 +172,7 @@ final class MotionController: ObservableObject {
             self.connectionTimeout?.cancel(); self.connectionRequestID = nil; self.connectionBusy = false
             switch result {
             case .success(let reply):
-                self.applyConfiguration(reply.configuration)
+                self.applyConfiguration(reply.configuration,confirmed:true)
                 self.connectionReady = reply.configuration.allowsControl && reply.targetReady
                 self.connectionMessage = reply.message
                 if activate {

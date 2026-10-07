@@ -23,6 +23,8 @@ struct ContentView: View {
                     } else if motion.studioStreaming {
                         Label("Sensor stream → computer",systemImage:"waveform.path.ecg").font(.caption2).foregroundStyle(.secondary)
                     }
+                    VolumeStatusView(remote:motion.volume,feedback:motion.volumeTwist,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
+                    if !motion.volume.ownsMotion {
                     VStack(spacing:5) {
                         MotionAxisMeter(title:"Twist",degrees:motion.rollDegrees)
                         MotionAxisMeter(title:"Tilt",degrees:motion.pitchDegrees,tint:.cyan)
@@ -30,7 +32,7 @@ struct ContentView: View {
                         Text(motion.running ? "Yaw 55° to enter · twist + / −" : "Activate to see live movement")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
-                    VolumeStatusView(remote:motion.volume,feedback:motion.volumeTwist,tapStatus:motion.tapEnrollmentStatus) { motion.endVolume(lock:true) }
+                    }
                     if #available(watchOS 11.0, *) {
                         armButton.handGestureShortcut(.primaryAction)
                     } else { armButton }
@@ -118,6 +120,7 @@ struct ContentView: View {
 private struct WatchConnectionCard: View {
     @ObservedObject var motion: MotionController
     @ObservedObject var link: WatchLink
+    @State private var expanded = false
     var body: some View {
         VStack(spacing:5) {
             Label(link.reachable ? "iPhone link online" : "iPhone link offline",systemImage:"iphone.radiowaves.left.and.right")
@@ -125,14 +128,17 @@ private struct WatchConnectionCard: View {
             Text("Control target: \(motion.configuration.selectedProfile.name)").bold()
             Text(!motion.configuration.allowsControl ? "Disconnected" : motion.connectionMessage)
                 .multilineTextAlignment(.center)
-            Picker("Choose target",selection:Binding(get:{motion.configuration.selectedProfileID},set:{motion.connectTarget($0)})) {
-                ForEach(motion.configuration.profiles) { Text($0.name).tag($0.id) }
-            }.disabled(motion.connectionBusy || motion.studioRecording)
-            HStack {
-                Button("Connect") { motion.connectTarget(motion.configuration.selectedProfileID) }
-                Button("Disconnect") { motion.disconnectTarget() }
-            }.disabled(motion.connectionBusy || motion.studioRecording)
-            Button("Refresh status") { motion.refreshConnection() }.disabled(motion.connectionBusy)
+            Button(expanded ? "Hide connections" : "Connections") { expanded.toggle() }
+            if expanded {
+                Picker("Choose target",selection:Binding(get:{motion.configuration.selectedProfileID},set:{motion.connectTarget($0)})) {
+                    ForEach(motion.configuration.profiles) { Text($0.name).tag($0.id) }
+                }.disabled(motion.connectionBusy || motion.studioRecording)
+                HStack {
+                    Button("Connect") { motion.connectTarget(motion.configuration.selectedProfileID) }
+                    Button("Disconnect") { motion.disconnectTarget() }
+                }.disabled(motion.connectionBusy || motion.studioRecording)
+                Button("Refresh status") { motion.refreshConnection() }.disabled(motion.connectionBusy)
+            }
         }.font(.caption2).padding(6).background(.purple.opacity(0.12),in:RoundedRectangle(cornerRadius:8))
     }
 }

@@ -77,7 +77,7 @@ Computer HTTP is intended for a trusted private LAN. HTTPS with a trusted certif
 
 ## Computer studio
 
-Enable **Computer studio** on the foreground iPhone, open the receiver dashboard, and choose **Live sensors → Start sensors**. Monitoring is independent of the command target: Phone can remain selected while its Watch motion is viewed on the computer. There is still only one command target.
+Double-click **Start-Wizardry.cmd** to open the receiver dashboard and studio in dry-run mode, or run `Start-Wizardry.cmd --execute` for computer commands. Enable **Computer studio** on the foreground iPhone and choose **Live sensors → Start sensors** on the computer. Monitoring is independent of the command target: Phone can remain selected while its Watch motion is viewed on the computer. There is still only one command target.
 
 In **Record movements**, create a named movement and choose **Record example**. Stay still during **Preparing**; move only after the Watch confirms recording and the dashboard shows **Recording — move now**. Capture disables Watch gesture actions. **Stop & save** writes the recording locally; **Cancel** discards it. Recordings stop after 60 seconds, and interrupted or incomplete takes carry quality information instead of becoming validated examples.
 

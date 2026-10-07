@@ -31,7 +31,7 @@ This is a one-time installation-order migration; subsequent paired-app builds up
 
 ## Connect a control target
 
-Connect **Computer** or **Phone** from the Watch, or select the intended target and use **Connect Watch** on iPhone. Watch commands always pass through the paired iPhone, including Computer commands. Only one command target is active. Computer requires the saved receiver address/token; live Phone volume requires the foreground iPhone app and visible native slider. Select Home on iPhone when using configured Home actions.
+Open **Connections** on the Watch to choose **Computer** or **Phone**, then use **Connect**, **Disconnect**, or **Refresh status**. On iPhone, select the intended target and use **Connect Watch**. Watch commands always pass through the paired iPhone, including Computer commands. Only one command target is active. Computer requires the saved receiver address/token; live Phone volume requires the foreground iPhone app and visible native slider. Select Home on iPhone when using configured Home actions.
 
 **Disconnect** stops Wizardry command control and invalidates the active interaction. It does not unpair Apple Watch/Bluetooth, delete receiver credentials, or revoke Spotify authorization. Reconnect the intended target, then activate afresh. Connection status reports Wizardry's control state and target acknowledgement, not a promise that every future output action will succeed. Merely editing another profile does not activate it.
 
